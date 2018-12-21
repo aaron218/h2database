@@ -5,7 +5,6 @@
  */
 package org.h2.command.dml;
 
-import java.sql.ResultSet;
 import org.h2.command.CommandInterface;
 import org.h2.command.Prepared;
 import org.h2.engine.Session;
@@ -34,9 +33,9 @@ public class Call extends Prepared {
         LocalResult result;
         if (isResultSet) {
             Expression[] expr = expression.getExpressionColumns(session);
-            result = new LocalResult(session, expr, expr.length);
+            result = session.getDatabase().getResultFactory().create(session, expr, expr.length);
         } else {
-            result = new LocalResult(session, expressions, 1);
+            result = session.getDatabase().getResultFactory().create(session, expressions, 1);
         }
         result.done();
         return result;
@@ -64,11 +63,9 @@ public class Call extends Prepared {
         setCurrentRowNumber(1);
         Value v = expression.getValue(session);
         if (isResultSet) {
-            v = v.convertTo(Value.RESULT_SET);
-            ResultSet rs = v.getResultSet();
-            return LocalResult.read(session, rs, maxrows);
+            return v.getResult();
         }
-        LocalResult result = new LocalResult(session, expressions, 1);
+        LocalResult result = session.getDatabase().getResultFactory().create(session, expressions, 1);
         Value[] row = { v };
         result.addRow(row);
         result.done();

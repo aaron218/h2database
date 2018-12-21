@@ -11,7 +11,7 @@ import org.h2.message.DbException;
 import org.h2.table.ColumnResolver;
 import org.h2.table.TableFilter;
 import org.h2.value.Value;
-import org.h2.value.ValueInt;
+import org.h2.value.ValueLong;
 
 /**
  * Represents the ROWNUM function.
@@ -29,16 +29,16 @@ public class Rownum extends Expression {
 
     @Override
     public Value getValue(Session session) {
-        return ValueInt.get(prepared.getCurrentRowNumber());
+        return ValueLong.get(prepared.getCurrentRowNumber());
     }
 
     @Override
     public int getType() {
-        return Value.INT;
+        return Value.LONG;
     }
 
     @Override
-    public void mapColumns(ColumnResolver resolver, int level) {
+    public void mapColumns(ColumnResolver resolver, int level, int state) {
         // nothing to do
     }
 
@@ -59,12 +59,12 @@ public class Rownum extends Expression {
 
     @Override
     public long getPrecision() {
-        return ValueInt.PRECISION;
+        return ValueLong.PRECISION;
     }
 
     @Override
     public int getDisplaySize() {
-        return ValueInt.DISPLAY_SIZE;
+        return ValueLong.DISPLAY_SIZE;
     }
 
     @Override
@@ -73,7 +73,12 @@ public class Rownum extends Expression {
     }
 
     @Override
-    public void updateAggregate(Session session) {
+    public StringBuilder getSQL(StringBuilder builder) {
+        return builder.append("ROWNUM()");
+    }
+
+    @Override
+    public void updateAggregate(Session session, int stage) {
         // nothing to do
     }
 
@@ -81,7 +86,7 @@ public class Rownum extends Expression {
     public boolean isEverything(ExpressionVisitor visitor) {
         switch (visitor.getType()) {
         case ExpressionVisitor.QUERY_COMPARABLE:
-        case ExpressionVisitor.OPTIMIZABLE_MIN_MAX_COUNT_ALL:
+        case ExpressionVisitor.OPTIMIZABLE_AGGREGATE:
         case ExpressionVisitor.DETERMINISTIC:
         case ExpressionVisitor.INDEPENDENT:
             return false;

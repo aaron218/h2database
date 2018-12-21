@@ -16,10 +16,10 @@ import org.h2.mvstore.Cursor;
 import org.h2.mvstore.DataUtils;
 import org.h2.mvstore.MVMap;
 import org.h2.mvstore.MVStore;
-import org.h2.mvstore.Page;
 import org.h2.mvstore.WriteBuffer;
 import org.h2.mvstore.type.DataType;
 import org.h2.mvstore.type.ObjectDataType;
+import org.h2.util.StringUtils;
 
 /**
  * A store that supports concurrent MVCC read-committed transactions.
@@ -154,7 +154,8 @@ public class TransactionStore {
                     if (mapName.length() > UNDO_LOG_NAME_PREFIX.length()) {
                         boolean committed = mapName.charAt(UNDO_LOG_NAME_PREFIX.length()) == UNDO_LOG_COMMITTED;
                         if (store.hasData(mapName) || committed) {
-                            int transactionId = Integer.parseInt(mapName.substring(UNDO_LOG_NAME_PREFIX.length() + 1));
+                            int transactionId = StringUtils.parseUInt31(mapName, UNDO_LOG_NAME_PREFIX.length() + 1,
+                                    mapName.length());
                             VersionedBitSet openTxBitSet = openTransactions.get();
                             if (!openTxBitSet.get(transactionId)) {
                                 Object[] data = preparedTransactions.get(transactionId);
@@ -416,7 +417,7 @@ public class TransactionStore {
      * @param map the map
      */
     <K, V> void removeMap(TransactionMap<K, V> map) {
-        store.removeMap(map.map, true);
+        store.removeMap(map.map, false);
     }
 
     /**
@@ -448,7 +449,11 @@ public class TransactionStore {
                         if (map != null) { // might be null if map was removed later
                             Object key = op[1];
                             commitDecisionMaker.setUndoKey(undoKey);
-                            map.operate(key, null, commitDecisionMaker);
+                            // although second parameter (value) is not really
+                            // used by CommitDecisionMaker, MVRTreeMap has weird
+                            // traversal logic based on it, and any non-null
+                            // value will do, to signify update, not removal
+                            map.operate(key, VersionedValue.DUMMY, commitDecisionMaker);
                         }
                     }
                     undoLog.clear();

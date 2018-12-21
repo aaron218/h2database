@@ -30,6 +30,7 @@ import org.h2.test.db.TestCheckpoint;
 import org.h2.test.db.TestCluster;
 import org.h2.test.db.TestCompatibility;
 import org.h2.test.db.TestCompatibilityOracle;
+import org.h2.test.db.TestCompatibilitySQLServer;
 import org.h2.test.db.TestCsv;
 import org.h2.test.db.TestDateStorage;
 import org.h2.test.db.TestDeadlock;
@@ -132,6 +133,7 @@ import org.h2.test.store.TestCacheLIRS;
 import org.h2.test.store.TestCacheLongKeyLIRS;
 import org.h2.test.store.TestConcurrent;
 import org.h2.test.store.TestDataUtils;
+import org.h2.test.store.TestDefrag;
 import org.h2.test.store.TestFreeSpace;
 import org.h2.test.store.TestKillProcessWhileWriting;
 import org.h2.test.store.TestMVRTree;
@@ -180,6 +182,7 @@ import org.h2.test.unit.TestDataPage;
 import org.h2.test.unit.TestDate;
 import org.h2.test.unit.TestDateIso8601;
 import org.h2.test.unit.TestDateTimeUtils;
+import org.h2.test.unit.TestDbException;
 import org.h2.test.unit.TestExit;
 import org.h2.test.unit.TestFile;
 import org.h2.test.unit.TestFileLock;
@@ -187,10 +190,14 @@ import org.h2.test.unit.TestFileLockProcess;
 import org.h2.test.unit.TestFileLockSerialized;
 import org.h2.test.unit.TestFileSystem;
 import org.h2.test.unit.TestFtp;
+import org.h2.test.unit.TestGeometryUtils;
 import org.h2.test.unit.TestIntArray;
 import org.h2.test.unit.TestIntIntHashMap;
 import org.h2.test.unit.TestIntPerfectHash;
+import org.h2.test.unit.TestInterval;
 import org.h2.test.unit.TestJmx;
+import org.h2.test.unit.TestKeywords;
+import org.h2.test.unit.TestLocalResultFactory;
 import org.h2.test.unit.TestLocale;
 import org.h2.test.unit.TestMathUtils;
 import org.h2.test.unit.TestMemoryUnmapper;
@@ -216,6 +223,7 @@ import org.h2.test.unit.TestSort;
 import org.h2.test.unit.TestStreams;
 import org.h2.test.unit.TestStringCache;
 import org.h2.test.unit.TestStringUtils;
+import org.h2.test.unit.TestSubqueryPerformanceOnLazyExecutionMode;
 import org.h2.test.unit.TestTimeStampWithTimeZone;
 import org.h2.test.unit.TestTools;
 import org.h2.test.unit.TestTraceSystem;
@@ -741,6 +749,7 @@ kill -9 `jps -l | grep "org.h2.test." | cut -d " " -f 1`
         addTest(new TestCheckpoint());
         addTest(new TestCompatibility());
         addTest(new TestCompatibilityOracle());
+        addTest(new TestCompatibilitySQLServer());
         addTest(new TestCsv());
         addTest(new TestDeadlock());
         if (vmlens) {
@@ -916,8 +925,10 @@ kill -9 `jps -l | grep "org.h2.test." | cut -d " " -f 1`
         addTest(new TestFileLockSerialized());
         addTest(new TestFileLockProcess());
         addTest(new TestFileSystem());
+        addTest(new TestDefrag());
         addTest(new TestTools());
         addTest(new TestSampleApps());
+        addTest(new TestSubqueryPerformanceOnLazyExecutionMode());
 
         runAddedTests(1);
     }
@@ -955,11 +966,15 @@ kill -9 `jps -l | grep "org.h2.test." | cut -d " " -f 1`
         addTest(new TestClearReferences());
         addTest(new TestDataPage());
         addTest(new TestDateIso8601());
+        addTest(new TestDbException());
         addTest(new TestFile());
         addTest(new TestFtp());
+        addTest(new TestGeometryUtils());
+        addTest(new TestInterval());
         addTest(new TestIntArray());
         addTest(new TestIntIntHashMap());
         addTest(new TestIntPerfectHash());
+        addTest(new TestKeywords());
         addTest(new TestMathUtils());
         addTest(new TestMemoryUnmapper());
         addTest(new TestMode());
@@ -976,6 +991,7 @@ kill -9 `jps -l | grep "org.h2.test." | cut -d " " -f 1`
         addTest(new TestTraceSystem());
         addTest(new TestUtils());
         addTest(new TestValueHashMap());
+        addTest(new TestLocalResultFactory());
 
         runAddedTests();
 

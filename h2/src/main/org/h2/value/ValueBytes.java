@@ -79,8 +79,9 @@ public class ValueBytes extends Value {
     }
 
     @Override
-    public String getSQL() {
-        return "X'" + StringUtils.convertBytesToHex(getBytesNoCopy()) + "'";
+    public StringBuilder getSQL(StringBuilder builder) {
+        builder.append("X'");
+        return StringUtils.convertBytesToHex(builder, getBytesNoCopy()).append('\'');
     }
 
     @Override
@@ -153,8 +154,7 @@ public class ValueBytes extends Value {
             return this;
         }
         int len = MathUtils.convertLongToInt(precision);
-        byte[] buff = Arrays.copyOf(value, len);
-        return get(buff);
+        return getNoCopy(Arrays.copyOf(value, len));
     }
 
 }

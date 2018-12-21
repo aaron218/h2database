@@ -24,7 +24,6 @@ import org.h2.engine.UndoLogRecord;
 import org.h2.index.Index;
 import org.h2.index.IndexType;
 import org.h2.index.LinkedIndex;
-import org.h2.jdbc.JdbcSQLException;
 import org.h2.message.DbException;
 import org.h2.result.Row;
 import org.h2.result.RowList;
@@ -373,26 +372,22 @@ public class TableLink extends Table {
         }
         buff.append("LINKED TABLE ").append(getSQL());
         if (comment != null) {
-            buff.append(" COMMENT ").append(StringUtils.quoteStringSQL(comment));
+            buff.append(" COMMENT ");
+            StringUtils.quoteStringSQL(buff, comment);
         }
-        buff.append('(').
-            append(StringUtils.quoteStringSQL(driver)).
-            append(", ").
-            append(StringUtils.quoteStringSQL(url)).
-            append(", ").
-            append(StringUtils.quoteStringSQL(user)).
-            append(", ").
-            append(StringUtils.quoteStringSQL(password)).
-            append(", ").
-            append(StringUtils.quoteStringSQL(originalTable)).
-            append(')');
+        buff.append('(');
+        StringUtils.quoteStringSQL(buff, driver).append(", ");
+        StringUtils.quoteStringSQL(buff, url).append(", ");
+        StringUtils.quoteStringSQL(buff, user).append(", ");
+        StringUtils.quoteStringSQL(buff, password).append(", ");
+        StringUtils.quoteStringSQL(buff, originalTable).append(')');
         if (emitUpdates) {
             buff.append(" EMIT UPDATES");
         }
         if (readOnly) {
             buff.append(" READONLY");
         }
-        buff.append(" /*").append(JdbcSQLException.HIDE_SQL).append("*/");
+        buff.append(" /*").append(DbException.HIDE_SQL).append("*/");
         return buff.toString();
     }
 
@@ -511,7 +506,8 @@ public class TableLink extends Table {
                             int i = 1;
                             for (Value v : params) {
                                 buff.appendExceptFirst(", ");
-                                buff.append(i++).append(": ").append(v.getSQL());
+                                buff.append(i++).append(": ");
+                                v.getSQL(buff.builder());
                             }
                             buff.append('}');
                         }

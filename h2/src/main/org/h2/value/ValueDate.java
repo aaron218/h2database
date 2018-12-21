@@ -47,7 +47,8 @@ public class ValueDate extends Value {
      * @return the value
      */
     public static ValueDate get(Date date) {
-        return fromDateValue(DateTimeUtils.dateValueFromDate(date.getTime()));
+        long ms = date.getTime();
+        return fromDateValue(DateTimeUtils.dateValueFromLocalMillis(ms + DateTimeUtils.getTimeZoneOffset(ms)));
     }
 
     /**
@@ -58,7 +59,7 @@ public class ValueDate extends Value {
      * @return the value
      */
     public static ValueDate fromMillis(long ms) {
-        return fromDateValue(DateTimeUtils.dateValueFromDate(ms));
+        return fromDateValue(DateTimeUtils.dateValueFromLocalMillis(ms + DateTimeUtils.getTimeZoneOffset(ms)));
     }
 
     /**
@@ -98,8 +99,10 @@ public class ValueDate extends Value {
     }
 
     @Override
-    public String getSQL() {
-        return "DATE '" + getString() + "'";
+    public StringBuilder getSQL(StringBuilder builder) {
+        builder.append("DATE '");
+        DateTimeUtils.appendDate(builder, dateValue);
+        return builder.append('\'');
     }
 
     @Override

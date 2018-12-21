@@ -13,12 +13,16 @@ import java.util.Arrays;
 import org.h2.engine.Constants;
 import org.h2.engine.SysProperties;
 import org.h2.util.MathUtils;
-import org.h2.util.StatementBuilder;
 
 /**
  * Implementation of the ARRAY data type.
  */
 public class ValueArray extends Value {
+
+    /**
+     * Empty array.
+     */
+    private static final Object EMPTY = get(new Value[0]);
 
     private final Class<?> componentType;
     private final Value[] values;
@@ -50,6 +54,15 @@ public class ValueArray extends Value {
      */
     public static ValueArray get(Class<?> componentType, Value[] list) {
         return new ValueArray(componentType, list);
+    }
+
+    /**
+     * Returns empty array.
+     *
+     * @return empty array
+     */
+    public static ValueArray getEmpty() {
+        return (ValueArray) EMPTY;
     }
 
     @Override
@@ -89,12 +102,14 @@ public class ValueArray extends Value {
 
     @Override
     public String getString() {
-        StatementBuilder buff = new StatementBuilder("(");
-        for (Value v : values) {
-            buff.appendExceptFirst(", ");
-            buff.append(v.getString());
+        StringBuilder builder = new StringBuilder().append('[');
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(values[i].getString());
         }
-        return buff.append(')').toString();
+        return builder.append(']').toString();
     }
 
     @Override
@@ -141,26 +156,29 @@ public class ValueArray extends Value {
     }
 
     @Override
-    public String getSQL() {
-        StatementBuilder buff = new StatementBuilder("(");
-        for (Value v : values) {
-            buff.appendExceptFirst(", ");
-            buff.append(v.getSQL());
+    public StringBuilder getSQL(StringBuilder builder) {
+        builder.append("ARRAY [");
+        int length = values.length;
+        for (int i = 0; i < length; i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            values[i].getSQL(builder);
         }
-        if (values.length == 1) {
-            buff.append(',');
-        }
-        return buff.append(')').toString();
+        return builder.append(']');
     }
 
     @Override
     public String getTraceSQL() {
-        StatementBuilder buff = new StatementBuilder("(");
-        for (Value v : values) {
-            buff.appendExceptFirst(", ");
-            buff.append(v == null ? "null" : v.getTraceSQL());
+        StringBuilder builder = new StringBuilder("[");
+        for (int i = 0; i < values.length; i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            Value v = values[i];
+            builder.append(v == null ? "null" : v.getTraceSQL());
         }
-        return buff.append(')').toString();
+        return builder.append(']').toString();
     }
 
     @Override

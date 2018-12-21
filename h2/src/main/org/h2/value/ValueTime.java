@@ -9,7 +9,6 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Time;
 import org.h2.api.ErrorCode;
-import org.h2.engine.SysProperties;
 import org.h2.message.DbException;
 import org.h2.util.DateTimeUtils;
 
@@ -69,13 +68,11 @@ public class ValueTime extends Value {
      * @return the value
      */
     public static ValueTime fromNanos(long nanos) {
-        if (!SysProperties.UNLIMITED_TIME_RANGE) {
-            if (nanos < 0L || nanos >= DateTimeUtils.NANOS_PER_DAY) {
-                StringBuilder builder = new StringBuilder();
-                DateTimeUtils.appendTime(builder, nanos);
-                throw DbException.get(ErrorCode.INVALID_DATETIME_CONSTANT_2,
-                        "TIME", builder.toString());
-            }
+        if (nanos < 0L || nanos >= DateTimeUtils.NANOS_PER_DAY) {
+            StringBuilder builder = new StringBuilder();
+            DateTimeUtils.appendTime(builder, nanos);
+            throw DbException.get(ErrorCode.INVALID_DATETIME_CONSTANT_2,
+                    "TIME", builder.toString());
         }
         return (ValueTime) Value.cache(new ValueTime(nanos));
     }
@@ -87,7 +84,8 @@ public class ValueTime extends Value {
      * @return the value
      */
     public static ValueTime get(Time time) {
-        return fromNanos(DateTimeUtils.nanosFromDate(time.getTime()));
+        long ms = time.getTime();
+        return fromNanos(DateTimeUtils.nanosFromLocalMillis(ms + DateTimeUtils.getTimeZoneOffset(ms)));
     }
 
     /**
@@ -98,7 +96,7 @@ public class ValueTime extends Value {
      * @return the value
      */
     public static ValueTime fromMillis(long ms) {
-        return fromNanos(DateTimeUtils.nanosFromDate(ms));
+        return fromNanos(DateTimeUtils.nanosFromLocalMillis(ms + DateTimeUtils.getTimeZoneOffset(ms)));
     }
 
     /**
@@ -109,7 +107,7 @@ public class ValueTime extends Value {
      */
     public static ValueTime parse(String s) {
         try {
-            return fromNanos(DateTimeUtils.parseTimeNanos(s, 0, s.length(), false));
+            return fromNanos(DateTimeUtils.parseTimeNanos(s, 0, s.length()));
         } catch (Exception e) {
             throw DbException.get(ErrorCode.INVALID_DATETIME_CONSTANT_2,
                     e, "TIME", s);
@@ -141,8 +139,10 @@ public class ValueTime extends Value {
     }
 
     @Override
-    public String getSQL() {
-        return "TIME '" + getString() + "'";
+    public StringBuilder getSQL(StringBuilder builder) {
+        builder.append("TIME '");
+        DateTimeUtils.appendTime(builder, nanos);
+        return builder.append('\'');
     }
 
     @Override
@@ -229,16 +229,6 @@ public class ValueTime extends Value {
     @Override
     public Value divide(Value v) {
         return ValueTime.fromNanos((long) (nanos / v.getDouble()));
-    }
-
-    @Override
-    public int getSignum() {
-        return Long.signum(nanos);
-    }
-
-    @Override
-    public Value negate() {
-        return ValueTime.fromNanos(-nanos);
     }
 
 }

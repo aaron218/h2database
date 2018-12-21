@@ -46,7 +46,8 @@ import org.h2.api.Aggregate;
 import org.h2.api.AggregateFunction;
 import org.h2.api.ErrorCode;
 import org.h2.engine.Constants;
-import org.h2.jdbc.JdbcSQLException;
+import org.h2.expression.function.ToDateParser;
+import org.h2.expression.function.ToChar.Capitalization;
 import org.h2.message.DbException;
 import org.h2.store.fs.FileUtils;
 import org.h2.test.TestBase;
@@ -56,8 +57,6 @@ import org.h2.tools.SimpleResultSet;
 import org.h2.util.DateTimeUtils;
 import org.h2.util.IOUtils;
 import org.h2.util.StringUtils;
-import org.h2.util.ToChar.Capitalization;
-import org.h2.util.ToDateParser;
 import org.h2.value.Value;
 import org.h2.value.ValueTimestamp;
 import org.h2.value.ValueTimestampTimeZone;
@@ -441,7 +440,7 @@ public class TestFunctions extends TestDb implements AggregateFunction {
         stat.execute("create alias dynamic deterministic for \"" +
                 getClass().getName() + ".dynamic\"");
         setCount(0);
-        rs = stat.executeQuery("call dynamic(('a', 1))[0]");
+        rs = stat.executeQuery("call dynamic(('a', 1))[1]");
         rs.next();
         String a = rs.getString(1);
         assertEquals("a1", a);
@@ -649,8 +648,14 @@ public class TestFunctions extends TestDb implements AggregateFunction {
         InputStreamReader r = new InputStreamReader(FileUtils.newInputStream(fileName));
         String ps2 = IOUtils.readStringAndClose(r, -1);
         assertEquals(ps, ps2);
-        conn.close();
         FileUtils.delete(fileName);
+        // Test classpath prefix using this test class as input
+        fileName = "/" + this.getClass().getName().replaceAll("\\.", "/") + ".class";
+        rs = stat.executeQuery("SELECT LENGTH(FILE_READ('classpath:" + fileName + "')) LEN");
+        rs.next();
+        int fileSize = rs.getInt(1);
+        assertTrue(fileSize > 0);
+        conn.close();
     }
 
 
@@ -758,6 +763,16 @@ public class TestFunctions extends TestDb implements AggregateFunction {
                 "SELECT SIMPLE_MEDIAN(X) FILTER (WHERE X > 2) FROM SYSTEM_RANGE(1, 9)");
         rs.next();
         assertEquals("6", rs.getString(1));
+        rs = stat.executeQuery("SELECT SIMPLE_MEDIAN(X) OVER () FROM SYSTEM_RANGE(1, 9)");
+        for (int i = 1; i < 9; i++) {
+            assertTrue(rs.next());
+            assertEquals("5", rs.getString(1));
+        }
+        rs = stat.executeQuery("SELECT SIMPLE_MEDIAN(X) OVER (PARTITION BY X) FROM SYSTEM_RANGE(1, 9)");
+        for (int i = 1; i < 9; i++) {
+            assertTrue(rs.next());
+            assertEquals(Integer.toString(i), rs.getString(1));
+        }
         conn.close();
 
         if (config.memory) {
@@ -943,9 +958,9 @@ public class TestFunctions extends TestDb implements AggregateFunction {
         assertEquals("Hello", rs.getString(2));
         assertFalse(rs.next());
 
-        stat.execute("CREATE ALIAS ARRAY FOR \"" +
+        stat.execute("CREATE ALIAS GET_ARRAY FOR \"" +
                 getClass().getName() + ".getArray\"");
-        rs = stat.executeQuery("CALL ARRAY()");
+        rs = stat.executeQuery("CALL GET_ARRAY()");
         assertEquals(1, rs.getMetaData().getColumnCount());
         rs.next();
         Array a = rs.getArray(1);
@@ -954,7 +969,7 @@ public class TestFunctions extends TestDb implements AggregateFunction {
         assertEquals(0, ((Integer) array[0]).intValue());
         assertEquals("Hello", (String) array[1]);
         assertThrows(ErrorCode.INVALID_VALUE_2, a).getArray(1, -1);
-        assertThrows(ErrorCode.INVALID_VALUE_2, a).getArray(1, 3);
+        assertEquals(2, ((Object[]) a.getArray(1, 3)).length);
         assertEquals(0, ((Object[]) a.getArray(1, 0)).length);
         assertEquals(0, ((Object[]) a.getArray(2, 0)).length);
         assertThrows(ErrorCode.INVALID_VALUE_2, a).getArray(0, 0);
@@ -2023,12 +2038,12 @@ public class TestFunctions extends TestDb implements AggregateFunction {
         conn.close();
     }
 
-    private void testAnnotationProcessorsOutput() throws SQLException {
+    private void testAnnotationProcessorsOutput() {
         try {
             System.setProperty(TestAnnotationProcessor.MESSAGES_KEY, "WARNING,foo1|ERROR,foo2");
             callCompiledFunction("test_annotation_processor_warn_and_error");
             fail();
-        } catch (JdbcSQLException e) {
+        } catch (SQLException e) {
             assertEquals(ErrorCode.SYNTAX_ERROR_1, e.getErrorCode());
             assertContains(e.getMessage(), "foo1");
             assertContains(e.getMessage(), "foo2");

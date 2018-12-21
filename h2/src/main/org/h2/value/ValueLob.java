@@ -208,7 +208,7 @@ public class ValueLob extends Value {
 
     private static String getFileName(DataHandler handler, int tableId,
             int objectId) {
-        if (SysProperties.CHECK && tableId == 0 && objectId == 0) {
+        if (tableId == 0 && objectId == 0) {
             DbException.throwInternalError("0 LOB");
         }
         String table = tableId < 0 ? ".temp" : ".t" + tableId;
@@ -275,7 +275,7 @@ public class ValueLob extends Value {
 
     private static int getNewObjectId(DataHandler h) {
         String path = h.getDatabasePath();
-        if ((path != null) && (path.length() == 0)) {
+        if (path != null && path.isEmpty()) {
             path = new File(Utils.getProperty("java.io.tmpdir", "."),
                     SysProperties.PREFIX_TEMP_FILE).getAbsolutePath();
         }
@@ -371,12 +371,11 @@ public class ValueLob extends Value {
      *        the precision plays no role when converting the value
      * @param mode the database mode
      * @param column the column (if any), used for to improve the error message if conversion fails
-     * @param enumerators the ENUM datatype enumerators (if any),
-     *        for dealing with ENUM conversions
+     * @param extTypeInfo the extended data type information, or null
      * @return the converted value
      */
     @Override
-    public Value convertTo(int t, int precision, Mode mode, Object column, String[] enumerators) {
+    public Value convertTo(int t, int precision, Mode mode, Object column, ExtTypeInfo extTypeInfo) {
         if (t == valueType) {
             return this;
         } else if (t == Value.CLOB) {
@@ -571,15 +570,14 @@ public class ValueLob extends Value {
     }
 
     @Override
-    public String getSQL() {
-        String s;
+    public StringBuilder getSQL(StringBuilder builder) {
         if (valueType == Value.CLOB) {
-            s = getString();
-            return StringUtils.quoteStringSQL(s);
+            StringUtils.quoteStringSQL(builder, getString());
+        } else {
+            builder.append("X'");
+            StringUtils.convertBytesToHex(builder, getBytes()).append('\'');
         }
-        byte[] buff = getBytes();
-        s = StringUtils.convertBytesToHex(buff);
-        return "X'" + s + "'";
+        return builder;
     }
 
     @Override

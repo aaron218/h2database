@@ -9,12 +9,17 @@ package org.h2.util;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.math.BigInteger;
 import java.sql.Timestamp;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
+import org.h2.api.ErrorCode;
+import org.h2.api.IntervalQualifier;
 import org.h2.message.DbException;
+import org.h2.value.DataType;
 import org.h2.value.Value;
 import org.h2.value.ValueDate;
+import org.h2.value.ValueInterval;
 import org.h2.value.ValueTime;
 import org.h2.value.ValueTimestamp;
 import org.h2.value.ValueTimestampTimeZone;
@@ -64,6 +69,16 @@ public class LocalDateTimeUtils {
      * {@code Class<java.time.ZoneOffset>} or {@code null}.
      */
     private static final Class<?> ZONE_OFFSET;
+
+    /**
+     * {@code Class<java.time.Period>} or {@code null}.
+     */
+    public static final Class<?> PERIOD;
+
+    /**
+     * {@code Class<java.time.Duration>} or {@code null}.
+     */
+    public static final Class<?> DURATION;
 
     /**
      * {@code java.time.LocalTime#ofNanoOfDay()} or {@code null}.
@@ -146,6 +161,41 @@ public class LocalDateTimeUtils {
      */
     private static final Method ZONE_OFFSET_GET_TOTAL_SECONDS;
 
+    /**
+     * {@code java.time.Period#of(int, int, int)} or {@code null}.
+     */
+    private static final Method PERIOD_OF;
+
+    /**
+     * {@code java.time.Period#getYears()} or {@code null}.
+     */
+    private static final Method PERIOD_GET_YEARS;
+
+    /**
+     * {@code java.time.Period#getMonths()} or {@code null}.
+     */
+    private static final Method PERIOD_GET_MONTHS;
+
+    /**
+     * {@code java.time.Period#getDays()} or {@code null}.
+     */
+    private static final Method PERIOD_GET_DAYS;
+
+    /**
+     * {@code java.time.Duration#ofSeconds(long, long)} or {@code null}.
+     */
+    private static final Method DURATION_OF_SECONDS;
+
+    /**
+     * {@code java.time.Duration#getSeconds()} or {@code null}.
+     */
+    private static final Method DURATION_GET_SECONDS;
+
+    /**
+     * {@code java.time.Duration#getNano()} or {@code null}.
+     */
+    private static final Method DURATION_GET_NANO;
+
     private static final boolean IS_JAVA8_DATE_API_PRESENT;
 
     static {
@@ -155,9 +205,11 @@ public class LocalDateTimeUtils {
         INSTANT = tryGetClass("java.time.Instant");
         OFFSET_DATE_TIME = tryGetClass("java.time.OffsetDateTime");
         ZONE_OFFSET = tryGetClass("java.time.ZoneOffset");
+        PERIOD = tryGetClass("java.time.Period");
+        DURATION = tryGetClass("java.time.Duration");
         IS_JAVA8_DATE_API_PRESENT = LOCAL_DATE != null && LOCAL_TIME != null &&
                 LOCAL_DATE_TIME != null && INSTANT != null &&
-                OFFSET_DATE_TIME != null && ZONE_OFFSET != null;
+                OFFSET_DATE_TIME != null && ZONE_OFFSET != null && PERIOD != null && DURATION != null;
 
         if (IS_JAVA8_DATE_API_PRESENT) {
             LOCAL_TIME_OF_NANO = getMethod(LOCAL_TIME, "ofNanoOfDay", long.class);
@@ -187,6 +239,15 @@ public class LocalDateTimeUtils {
                     OFFSET_DATE_TIME, "of", LOCAL_DATE_TIME, ZONE_OFFSET);
 
             ZONE_OFFSET_GET_TOTAL_SECONDS = getMethod(ZONE_OFFSET, "getTotalSeconds");
+
+            PERIOD_OF = getMethod(PERIOD, "of", int.class, int.class, int.class);
+            PERIOD_GET_YEARS = getMethod(PERIOD, "getYears");
+            PERIOD_GET_MONTHS = getMethod(PERIOD, "getMonths");
+            PERIOD_GET_DAYS = getMethod(PERIOD, "getDays");
+
+            DURATION_OF_SECONDS = getMethod(DURATION, "ofSeconds", long.class, long.class);
+            DURATION_GET_SECONDS = getMethod(DURATION, "getSeconds");
+            DURATION_GET_NANO = getMethod(DURATION, "getNano");
         } else {
             LOCAL_TIME_OF_NANO = null;
             LOCAL_TIME_TO_NANO = null;
@@ -206,6 +267,13 @@ public class LocalDateTimeUtils {
             OFFSET_DATE_TIME_GET_OFFSET = null;
             OFFSET_DATE_TIME_OF_LOCAL_DATE_TIME_ZONE_OFFSET = null;
             ZONE_OFFSET_GET_TOTAL_SECONDS = null;
+            PERIOD_OF = null;
+            PERIOD_GET_YEARS = null;
+            PERIOD_GET_MONTHS = null;
+            PERIOD_GET_DAYS = null;
+            DURATION_OF_SECONDS = null;
+            DURATION_GET_SECONDS = null;
+            DURATION_GET_NANO = null;
         }
     }
 
@@ -342,6 +410,63 @@ public class LocalDateTimeUtils {
 
             return OFFSET_DATE_TIME_OF_LOCAL_DATE_TIME_ZONE_OFFSET.invoke(null,
                     localDateTime, offset);
+        } catch (IllegalAccessException e) {
+            throw DbException.convert(e);
+        } catch (InvocationTargetException e) {
+            throw DbException.convertInvocation(e, "timestamp with time zone conversion failed");
+        }
+    }
+
+    /**
+     * Converts a value to a Period.
+     *
+     * <p>This method should only called from Java 8 or later.</p>
+     *
+     * @param value the value to convert
+     * @return the Period
+     */
+    public static Object valueToPeriod(Value value) {
+        if (!(value instanceof ValueInterval)) {
+            value = value.convertTo(Value.INTERVAL_YEAR_TO_MONTH);
+        }
+        if (!DataType.isYearMonthIntervalType(value.getType())) {
+            throw DbException.get(ErrorCode.DATA_CONVERSION_ERROR_1, (Throwable) null, value.getString());
+        }
+        ValueInterval v = (ValueInterval) value;
+        IntervalQualifier qualifier = v.getQualifier();
+        boolean negative = v.isNegative();
+        long leading = v.getLeading();
+        long remaining = v.getRemaining();
+        int y = Value.convertToInt(IntervalUtils.yearsFromInterval(qualifier, negative, leading, remaining), null);
+        int m = Value.convertToInt(IntervalUtils.monthsFromInterval(qualifier, negative, leading, remaining), null);
+        try {
+            return PERIOD_OF.invoke(null, y, m, 0);
+        } catch (IllegalAccessException e) {
+            throw DbException.convert(e);
+        } catch (InvocationTargetException e) {
+            throw DbException.convertInvocation(e, "timestamp with time zone conversion failed");
+        }
+    }
+
+    /**
+     * Converts a value to a Duration.
+     *
+     * <p>This method should only called from Java 8 or later.</p>
+     *
+     * @param value the value to convert
+     * @return the Duration
+     */
+    public static Object valueToDuration(Value value) {
+        if (!(value instanceof ValueInterval)) {
+            value = value.convertTo(Value.INTERVAL_DAY_TO_SECOND);
+        }
+        if (DataType.isYearMonthIntervalType(value.getType())) {
+            throw DbException.get(ErrorCode.DATA_CONVERSION_ERROR_1, (Throwable) null, value.getString());
+        }
+        BigInteger[] dr = IntervalUtils.intervalToAbsolute((ValueInterval) value)
+                .divideAndRemainder(BigInteger.valueOf(1_000_000_000));
+        try {
+            return DURATION_OF_SECONDS.invoke(null, dr[0].longValue(), dr[1].longValue());
         } catch (IllegalAccessException e) {
             throw DbException.convert(e);
         } catch (InvocationTargetException e) {
@@ -491,6 +616,86 @@ public class LocalDateTimeUtils {
         Object localDate = localDateFromDateValue(dateValue);
         Object localDateTime = LOCAL_DATE_AT_START_OF_DAY.invoke(localDate);
         return LOCAL_DATE_TIME_PLUS_NANOS.invoke(localDateTime, timeNanos);
+    }
+
+    /**
+     * Converts a Period to a Value.
+     *
+     * @param period the Period to convert, not {@code null}
+     * @return the value
+     */
+    public static ValueInterval periodToValue(Object period) {
+        try {
+            int days = (int) PERIOD_GET_DAYS.invoke(period);
+            if (days != 0) {
+                throw DbException.getInvalidValueException("Period.days", days);
+            }
+            int years = (int) PERIOD_GET_YEARS.invoke(period);
+            int months = (int) PERIOD_GET_MONTHS.invoke(period);
+            IntervalQualifier qualifier;
+            boolean negative = false;
+            long leading = 0L, remaining = 0L;
+            if (years == 0) {
+                if (months == 0L) {
+                    // Use generic qualifier
+                    qualifier = IntervalQualifier.YEAR_TO_MONTH;
+                } else {
+                    qualifier = IntervalQualifier.MONTH;
+                    leading = months;
+                    if (leading < 0) {
+                        leading = -leading;
+                        negative = true;
+                    }
+                }
+            } else {
+                if (months == 0L) {
+                    qualifier = IntervalQualifier.YEAR;
+                    leading = years;
+                    if (leading < 0) {
+                        leading = -leading;
+                        negative = true;
+                    }
+                } else {
+                    qualifier = IntervalQualifier.YEAR_TO_MONTH;
+                    leading = years * 12 + months;
+                    if (leading < 0) {
+                        leading = -leading;
+                        negative = true;
+                    }
+                    remaining = leading % 12;
+                    leading /= 12;
+                }
+            }
+            return ValueInterval.from(qualifier, negative, leading, remaining);
+        } catch (IllegalAccessException e) {
+            throw DbException.convert(e);
+        } catch (InvocationTargetException e) {
+            throw DbException.convertInvocation(e, "interval conversion failed");
+        }
+    }
+
+    /**
+     * Converts a Duration to a Value.
+     *
+     * @param duration the Duration to convert, not {@code null}
+     * @return the value
+     */
+    public static ValueInterval durationToValue(Object duration) {
+        try {
+            long seconds = (long) DURATION_GET_SECONDS.invoke(duration);
+            int nano = (int) DURATION_GET_NANO.invoke(duration);
+            boolean negative = seconds < 0;
+            seconds = Math.abs(seconds);
+            if (negative && nano != 0) {
+                nano = 1_000_000_000 - nano;
+                seconds--;
+            }
+            return ValueInterval.from(IntervalQualifier.SECOND, negative, seconds, nano);
+        } catch (IllegalAccessException e) {
+            throw DbException.convert(e);
+        } catch (InvocationTargetException e) {
+            throw DbException.convertInvocation(e, "interval conversion failed");
+        }
     }
 
 }

@@ -5,6 +5,8 @@
  */
 package org.h2.engine;
 
+import java.io.File;
+
 import org.h2.util.MathUtils;
 import org.h2.util.Utils;
 
@@ -42,26 +44,16 @@ public class SysProperties {
     public static final String H2_BROWSER = "h2.browser";
 
     /**
-     * System property <code>file.encoding</code> (default: Cp1252).<br />
-     * It is usually set by the system and is the default encoding used for the
-     * RunScript and CSV tool.
+     * System property <code>file.separator</code>.<br />
+     * It is set by the system, and used to build absolute file names.
      */
-    public static final String FILE_ENCODING =
-            Utils.getProperty("file.encoding", "Cp1252");
+    public static final String FILE_SEPARATOR = File.separator;
 
     /**
-     * System property <code>file.separator</code> (default: /).<br />
-     * It is usually set by the system, and used to build absolute file names.
+     * System property <code>line.separator</code>.<br />
+     * It is set by the system, and used by the script and trace tools.
      */
-    public static final String FILE_SEPARATOR =
-            Utils.getProperty("file.separator", "/");
-
-    /**
-     * System property <code>line.separator</code> (default: \n).<br />
-     * It is usually set by the system, and used by the script and trace tools.
-     */
-    public static final String LINE_SEPARATOR =
-            Utils.getProperty("line.separator", "\n");
+    public static final String LINE_SEPARATOR = System.lineSeparator();
 
     /**
      * System property <code>user.home</code> (empty string if not set).<br />
@@ -327,14 +319,6 @@ public class SysProperties {
     }
 
     /**
-     * System property <code>h2.oldStyleOuterJoin</code>
-     * (default: false).<br />
-     * Limited support for the old-style Oracle outer join with "(+)".
-     */
-    public static final boolean OLD_STYLE_OUTER_JOIN =
-            Utils.getProperty("h2.oldStyleOuterJoin", false);
-
-    /**
      * System property {@code h2.oldResultSetGetObject}, {@code true} by default
      * unless {@code h2.preview} is enabled.
      * <p>
@@ -354,7 +338,7 @@ public class SysProperties {
      * unless {@code h2.preview} is enabled.
      * <p>
      * If {@code true} map {@code BigDecimal} to {@code DECIMAL} type.
-     * <p>
+     * </p>
      * <p>
      * If {@code false} map {@code BigDecimal} to {@code NUMERIC} as specified
      * in JDBC specification (see Mapping from Java Object Types to JDBC Types).
@@ -382,38 +366,6 @@ public class SysProperties {
      * </p>
      */
     public static final boolean RETURN_OFFSET_DATE_TIME = Utils.getProperty("h2.returnOffsetDateTime", PREVIEW);
-
-    /**
-     * System property {@code h2.unlimitedTimeRange}, {@code false} by default.
-     *
-     * <p>
-     * Controls limits of TIME data type.
-     * </p>
-     *
-     * <table>
-     * <thead>
-     * <tr>
-     * <th>h2.unlimitedTimeRange</th>
-     * <th>Minimum TIME value</th>
-     * <th>Maximum TIME value</th>
-     * </tr>
-     * </thead>
-     * <tbody>
-     * <tr>
-     * <td>false</td>
-     * <td>00:00:00.000000000</td>
-     * <td>23:59:59.999999999</td>
-     * </tr>
-     * <tr>
-     * <td>true</td>
-     * <td>-2562047:47:16.854775808</td>
-     * <td>2562047:47:16.854775807</td>
-     * </tr>
-     * </tbody>
-     * </table>
-     */
-    public static final boolean UNLIMITED_TIME_RANGE =
-            Utils.getProperty("h2.unlimitedTimeRange", false);
 
     /**
      * System property <code>h2.pgClientEncoding</code> (default: UTF-8).<br />
@@ -604,6 +556,18 @@ public class SysProperties {
      */
     public static final String AUTH_CONFIG_FILE =
             Utils.getProperty("h2.authConfigFile", null);
+
+    /**
+     * System property {@code h2.mixedGeometries}, {@code false} by default.
+     * <p>
+     * If {@code true} illegal geometries with mixed XY/XYZ dimensionality like
+     * {@code 'LINESTRING (1 2, 3 4 5)'} are accepted.
+     * </p>
+     * <p>
+     * If {@code false} such geometries are rejected with data conversion error.
+     * </p>
+     */
+    public static final boolean MIXED_GEOMETRIES = Utils.getProperty("h2.mixedGeometries", false);
 
     private static final String H2_BASE_DIR = "h2.baseDir";
 

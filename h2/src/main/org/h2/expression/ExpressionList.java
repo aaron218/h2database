@@ -9,20 +9,22 @@ import org.h2.engine.Session;
 import org.h2.table.Column;
 import org.h2.table.ColumnResolver;
 import org.h2.table.TableFilter;
-import org.h2.util.StatementBuilder;
 import org.h2.value.Value;
 import org.h2.value.ValueArray;
+import org.h2.value.ValueRow;
 
 /**
  * A list of expressions, as in (ID, NAME).
- * The result of this expression is an array.
+ * The result of this expression is a row or an array.
  */
 public class ExpressionList extends Expression {
 
     private final Expression[] list;
+    private final boolean isArray;
 
-    public ExpressionList(Expression[] list) {
+    public ExpressionList(Expression[] list, boolean isArray) {
         this.list = list;
+        this.isArray = isArray;
     }
 
     @Override
@@ -31,18 +33,18 @@ public class ExpressionList extends Expression {
         for (int i = 0; i < list.length; i++) {
             v[i] = list[i].getValue(session);
         }
-        return ValueArray.get(v);
+        return isArray ? ValueArray.get(v) : ValueRow.get(v);
     }
 
     @Override
     public int getType() {
-        return Value.ARRAY;
+        return isArray ? Value.ARRAY : Value.ROW;
     }
 
     @Override
-    public void mapColumns(ColumnResolver resolver, int level) {
+    public void mapColumns(ColumnResolver resolver, int level, int state) {
         for (Expression e : list) {
-            e.mapColumns(resolver, level);
+            e.mapColumns(resolver, level, state);
         }
     }
 
@@ -85,22 +87,16 @@ public class ExpressionList extends Expression {
     }
 
     @Override
-    public String getSQL() {
-        StatementBuilder buff = new StatementBuilder("(");
-        for (Expression e: list) {
-            buff.appendExceptFirst(", ");
-            buff.append(e.getSQL());
-        }
-        if (list.length == 1) {
-            buff.append(',');
-        }
-        return buff.append(')').toString();
+    public StringBuilder getSQL(StringBuilder builder) {
+        builder.append(isArray ? "ARRAY [" : "ROW (");
+        writeExpressions(builder, list);
+        return builder.append(isArray ? ']' : ')');
     }
 
     @Override
-    public void updateAggregate(Session session) {
+    public void updateAggregate(Session session, int stage) {
         for (Expression e : list) {
-            e.updateAggregate(session);
+            e.updateAggregate(session, stage);
         }
     }
 
@@ -134,6 +130,26 @@ public class ExpressionList extends Expression {
             expr[i] = new ExpressionColumn(session.getDatabase(), col);
         }
         return expr;
+    }
+
+    @Override
+    public boolean isConstant() {
+        for (Expression e : list) {
+            if (!e.isConstant()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    @Override
+    public int getSubexpressionCount() {
+        return list.length;
+    }
+
+    @Override
+    public Expression getSubexpression(int index) {
+        return list[index];
     }
 
 }

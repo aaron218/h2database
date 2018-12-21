@@ -26,6 +26,8 @@ import java.util.HashMap;
 import java.util.UUID;
 
 import org.h2.api.ErrorCode;
+import org.h2.api.Interval;
+import org.h2.api.IntervalQualifier;
 import org.h2.api.TimestampWithTimeZone;
 import org.h2.engine.Mode;
 import org.h2.engine.SessionInterface;
@@ -36,7 +38,6 @@ import org.h2.jdbc.JdbcClob;
 import org.h2.jdbc.JdbcConnection;
 import org.h2.jdbc.JdbcLob;
 import org.h2.message.DbException;
-import org.h2.tools.SimpleResultSet;
 import org.h2.util.JdbcUtils;
 import org.h2.util.LocalDateTimeUtils;
 import org.h2.util.Utils;
@@ -181,9 +182,7 @@ public class DataType {
             g = null;
         }
         GEOMETRY_CLASS = g;
-    }
 
-    static {
         add(Value.NULL, Types.NULL,
                 new DataType(),
                 new String[]{"NULL"},
@@ -294,7 +293,7 @@ public class DataType {
                 createDate(ValueDate.PRECISION, ValueDate.PRECISION,
                         "DATE", false, 0, 0),
                 new String[]{"DATE"},
-                // 24 for ValueDate, 32 for java.sql.Data
+                // 24 for ValueDate, 32 for java.sql.Date
                 56
         );
         add(Value.TIMESTAMP, Types.TIMESTAMP,
@@ -314,7 +313,7 @@ public class DataType {
                         "TIMESTAMP_TZ", true, ValueTimestampTimeZone.DEFAULT_SCALE,
                         ValueTimestampTimeZone.MAXIMUM_SCALE),
                 new String[]{"TIMESTAMP WITH TIME ZONE"},
-                // 26 for ValueTimestampUtc, 32 for java.sql.Timestamp
+                // 26 for ValueTimestampTimeZone, 32 for java.sql.Timestamp
                 58
         );
         add(Value.BYTES, Types.VARBINARY,
@@ -358,7 +357,7 @@ public class DataType {
                 104
         );
         add(Value.GEOMETRY, Types.OTHER,
-                createString(false),
+                createGeometry(),
                 new String[]{"GEOMETRY"},
                 32
         );
@@ -384,6 +383,9 @@ public class DataType {
                 new String[]{"ENUM"},
                 48
         );
+        for (int i = Value.INTERVAL_YEAR; i <= Value.INTERVAL_MINUTE_TO_SECOND; i++) {
+            addInterval(i);
+        }
         for (Integer i : TYPES_BY_VALUE_TYPE.keySet()) {
             Value.getOrder(i);
         }
@@ -409,6 +411,29 @@ public class DataType {
                         ValueDecimal.DEFAULT_DISPLAY_SIZE, true, false),
                 new String[]{"NUMERIC", "NUMBER"},
                 64
+        );
+    }
+
+    private static void addInterval(int type) {
+        IntervalQualifier qualifier = IntervalQualifier.valueOf(type - Value.INTERVAL_YEAR);
+        String name = qualifier.toString();
+        DataType dataType = new DataType();
+        dataType.prefix = "INTERVAL ";
+        dataType.suffix = ' ' + name;
+        dataType.supportsPrecision = true;
+        dataType.defaultPrecision = ValueInterval.DEFAULT_PRECISION;
+        dataType.maxPrecision = ValueInterval.MAXIMUM_PRECISION;
+        if (qualifier.hasSeconds()) {
+            dataType.supportsScale = true;
+            dataType.defaultScale = ValueInterval.DEFAULT_SCALE;
+            dataType.maxScale = ValueInterval.MAXIMUM_SCALE;
+        }
+        dataType.defaultDisplaySize = ValueInterval.getDisplaySize(type, ValueInterval.DEFAULT_PRECISION,
+                // Scale will be ignored if it is not supported
+                ValueInterval.DEFAULT_SCALE);
+        add(type, Types.OTHER, dataType,
+                new String[]{("INTERVAL " + name).intern()},
+                36
         );
     }
 
@@ -520,6 +545,17 @@ public class DataType {
         t.maxPrecision = Long.MAX_VALUE;
         t.defaultPrecision = Long.MAX_VALUE;
         return t;
+    }
+
+    private static DataType createGeometry() {
+        DataType dataType = new DataType();
+        dataType.prefix = "'";
+        dataType.suffix = "'";
+        dataType.params = "TYPE,SRID";
+        dataType.maxPrecision = Integer.MAX_VALUE;
+        dataType.defaultPrecision = Integer.MAX_VALUE;
+        dataType.defaultDisplaySize = Integer.MAX_VALUE;
+        return dataType;
     }
 
     /**
@@ -737,12 +773,25 @@ public class DataType {
                     ValueInt.get(value);
                 break;
             }
+            case Value.ROW: {
+                Object[] list = (Object[]) rs.getObject(columnIndex);
+                if (list == null) {
+                    return ValueNull.INSTANCE;
+                }
+                int len = list.length;
+                Value[] values = new Value[len];
+                for (int i = 0; i < len; i++) {
+                    values[i] = DataType.convertToValue(session, list[i], Value.NULL);
+                }
+                v = ValueRow.get(values);
+                break;
+            }
             case Value.RESULT_SET: {
                 ResultSet x = (ResultSet) rs.getObject(columnIndex);
                 if (x == null) {
                     return ValueNull.INSTANCE;
                 }
-                return ValueResultSet.get(x);
+                return ValueResultSet.get(session, x, Integer.MAX_VALUE);
             }
             case Value.GEOMETRY: {
                 Object x = rs.getObject(columnIndex);
@@ -750,6 +799,27 @@ public class DataType {
                     return ValueNull.INSTANCE;
                 }
                 return ValueGeometry.getFromGeometry(x);
+            }
+            case Value.INTERVAL_YEAR:
+            case Value.INTERVAL_MONTH:
+            case Value.INTERVAL_DAY:
+            case Value.INTERVAL_HOUR:
+            case Value.INTERVAL_MINUTE:
+            case Value.INTERVAL_SECOND:
+            case Value.INTERVAL_YEAR_TO_MONTH:
+            case Value.INTERVAL_DAY_TO_HOUR:
+            case Value.INTERVAL_DAY_TO_MINUTE:
+            case Value.INTERVAL_DAY_TO_SECOND:
+            case Value.INTERVAL_HOUR_TO_MINUTE:
+            case Value.INTERVAL_HOUR_TO_SECOND:
+            case Value.INTERVAL_MINUTE_TO_SECOND: {
+                Object x = rs.getObject(columnIndex);
+                if (x == null) {
+                    return ValueNull.INSTANCE;
+                }
+                Interval interval = (Interval) x;
+                return ValueInterval.from(interval.getQualifier(), interval.isNegative(),
+                        interval.getLeading(), interval.getRemaining());
             }
             default:
                 if (JdbcUtils.customDataTypesHandler != null) {
@@ -851,7 +921,22 @@ public class DataType {
         case Value.RESULT_SET:
             return ResultSet.class.getName();
         case Value.GEOMETRY:
-            return GEOMETRY_CLASS_NAME;
+            return GEOMETRY_CLASS != null ? GEOMETRY_CLASS_NAME : String.class.getName();
+        case Value.INTERVAL_YEAR:
+        case Value.INTERVAL_MONTH:
+        case Value.INTERVAL_DAY:
+        case Value.INTERVAL_HOUR:
+        case Value.INTERVAL_MINUTE:
+        case Value.INTERVAL_SECOND:
+        case Value.INTERVAL_YEAR_TO_MONTH:
+        case Value.INTERVAL_DAY_TO_HOUR:
+        case Value.INTERVAL_DAY_TO_MINUTE:
+        case Value.INTERVAL_DAY_TO_SECOND:
+        case Value.INTERVAL_HOUR_TO_MINUTE:
+        case Value.INTERVAL_HOUR_TO_SECOND:
+        case Value.INTERVAL_MINUTE_TO_SECOND:
+            // "org.h2.api.Interval"
+            return Interval.class.getName();
         default:
             if (JdbcUtils.customDataTypesHandler != null) {
                 return JdbcUtils.customDataTypesHandler.getDataTypeClassName(type);
@@ -1179,10 +1264,7 @@ public class DataType {
                 throw DbException.convert(e);
             }
         } else if (x instanceof ResultSet) {
-            if (x instanceof SimpleResultSet) {
-                return ValueResultSet.get((ResultSet) x);
-            }
-            return ValueResultSet.getCopy((ResultSet) x, Integer.MAX_VALUE);
+            return ValueResultSet.get(session, (ResultSet) x, Integer.MAX_VALUE);
         } else if (x instanceof UUID) {
             return ValueUuid.get((UUID) x);
         }
@@ -1213,6 +1295,13 @@ public class DataType {
             return LocalDateTimeUtils.offsetDateTimeToValue(x);
         } else if (x instanceof TimestampWithTimeZone) {
             return ValueTimestampTimeZone.get((TimestampWithTimeZone) x);
+        } else if (x instanceof Interval) {
+            Interval i = (Interval) x;
+            return ValueInterval.from(i.getQualifier(), i.isNegative(), i.getLeading(), i.getRemaining());
+        } else if (clazz == LocalDateTimeUtils.PERIOD) {
+            return LocalDateTimeUtils.periodToValue(x);
+        } else if (clazz == LocalDateTimeUtils.DURATION) {
+            return LocalDateTimeUtils.durationToValue(x);
         } else {
             if (JdbcUtils.customDataTypesHandler != null) {
                 return JdbcUtils.customDataTypesHandler.getValue(type, x,
@@ -1287,6 +1376,26 @@ public class DataType {
     }
 
     /**
+     * Check if the given value type is an interval type.
+     *
+     * @param type the value type
+     * @return true if the value type is an interval type
+     */
+    public static boolean isIntervalType(int type) {
+        return type >= Value.INTERVAL_YEAR && type <= Value.INTERVAL_MINUTE_TO_SECOND;
+    }
+
+    /**
+     * Check if the given value type is a year-month interval type.
+     *
+     * @param type the value type
+     * @return true if the value type is a year-month interval type
+     */
+    public static boolean isYearMonthIntervalType(int type) {
+        return type == Value.INTERVAL_YEAR || type == Value.INTERVAL_MONTH || type == Value.INTERVAL_YEAR_TO_MONTH;
+    }
+
+    /**
      * Check if the given value type is a large object (BLOB or CLOB).
      *
      * @param type the value type
@@ -1297,6 +1406,16 @@ public class DataType {
     }
 
     /**
+     * Check if the given value type is a numeric type.
+     *
+     * @param type the value type
+     * @return true if the value type is a numeric type
+     */
+    public static boolean isNumericType(int type) {
+        return type >= Value.BYTE && type <= Value.FLOAT;
+    }
+
+    /**
      * Check if the given value type is a String (VARCHAR,...).
      *
      * @param type the value type
@@ -1304,6 +1423,16 @@ public class DataType {
      */
     public static boolean isStringType(int type) {
         return type == Value.STRING || type == Value.STRING_FIXED || type == Value.STRING_IGNORECASE;
+    }
+
+    /**
+     * Check if the given type may have extended type information.
+     *
+     * @param type the value type
+     * @return true if the value type may have extended type information
+     */
+    public static boolean isExtInfoType(int type) {
+        return type == Value.GEOMETRY || type == Value.ENUM;
     }
 
     /**
@@ -1321,6 +1450,19 @@ public class DataType {
         case Value.INT:
         case Value.LONG:
         case Value.SHORT:
+        case Value.INTERVAL_YEAR:
+        case Value.INTERVAL_MONTH:
+        case Value.INTERVAL_DAY:
+        case Value.INTERVAL_HOUR:
+        case Value.INTERVAL_MINUTE:
+        case Value.INTERVAL_SECOND:
+        case Value.INTERVAL_YEAR_TO_MONTH:
+        case Value.INTERVAL_DAY_TO_HOUR:
+        case Value.INTERVAL_DAY_TO_MINUTE:
+        case Value.INTERVAL_DAY_TO_SECOND:
+        case Value.INTERVAL_HOUR_TO_MINUTE:
+        case Value.INTERVAL_HOUR_TO_SECOND:
+        case Value.INTERVAL_MINUTE_TO_SECOND:
             return true;
         case Value.BOOLEAN:
         case Value.TIME:
@@ -1388,6 +1530,19 @@ public class DataType {
         case Value.ARRAY:
         case Value.RESULT_SET:
         case Value.GEOMETRY:
+        case Value.INTERVAL_YEAR:
+        case Value.INTERVAL_MONTH:
+        case Value.INTERVAL_DAY:
+        case Value.INTERVAL_HOUR:
+        case Value.INTERVAL_MINUTE:
+        case Value.INTERVAL_SECOND:
+        case Value.INTERVAL_YEAR_TO_MONTH:
+        case Value.INTERVAL_DAY_TO_HOUR:
+        case Value.INTERVAL_DAY_TO_MINUTE:
+        case Value.INTERVAL_DAY_TO_SECOND:
+        case Value.INTERVAL_HOUR_TO_MINUTE:
+        case Value.INTERVAL_HOUR_TO_SECOND:
+        case Value.INTERVAL_MINUTE_TO_SECOND:
             return type;
         default:
             if (JdbcUtils.customDataTypesHandler != null) {

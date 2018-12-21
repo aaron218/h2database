@@ -393,9 +393,7 @@ public class TestCrashAPI extends TestDb implements Runnable {
         try {
             callCount++;
             result = m.invoke(o, params);
-        } catch (IllegalArgumentException e) {
-            TestBase.logError("error", e);
-        } catch (IllegalAccessException e) {
+        } catch (IllegalArgumentException | IllegalAccessException e) {
             TestBase.logError("error", e);
         } catch (InvocationTargetException e) {
             Throwable t = e.getTargetException();
@@ -527,13 +525,11 @@ public class TestCrashAPI extends TestDb implements Runnable {
 
     private void initMethods() {
         for (Class<?> inter : INTERFACES) {
-            classMethods.put(inter, new ArrayList<Method>());
-        }
-        for (Class<?> inter : INTERFACES) {
-            ArrayList<Method> list = classMethods.get(inter);
+            ArrayList<Method> list = new ArrayList<>();
             for (Method m : inter.getMethods()) {
                 list.add(m);
             }
+            classMethods.put(inter, list);
         }
     }
 

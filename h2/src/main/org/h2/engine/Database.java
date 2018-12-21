@@ -41,6 +41,7 @@ import org.h2.message.Trace;
 import org.h2.message.TraceSystem;
 import org.h2.mvstore.MVStore;
 import org.h2.mvstore.db.MVTableEngine;
+import org.h2.result.LocalResultFactory;
 import org.h2.result.Row;
 import org.h2.result.RowFactory;
 import org.h2.result.SearchRow;
@@ -102,6 +103,7 @@ public class Database implements DataHandler {
     private static final ThreadLocal<Session> META_LOCK_DEBUGGING;
     private static final ThreadLocal<Database> META_LOCK_DEBUGGING_DB;
     private static final ThreadLocal<Throwable> META_LOCK_DEBUGGING_STACK;
+    private static final Session[] EMPTY_SESSION_ARRAY = new Session[0];
 
     static {
         boolean a = false;
@@ -138,7 +140,7 @@ public class Database implements DataHandler {
     private final HashMap<String, Setting> settings = new HashMap<>();
     private final HashMap<String, Schema> schemas = new HashMap<>();
     private final HashMap<String, Right> rights = new HashMap<>();
-    private final HashMap<String, UserDataType> userDataTypes = new HashMap<>();
+    private final HashMap<String, Domain> domains = new HashMap<>();
     private final HashMap<String, UserAggregate> aggregates = new HashMap<>();
     private final HashMap<String, Comment> comments = new HashMap<>();
     private final HashMap<String, TableEngine> tableEngines = new HashMap<>();
@@ -160,7 +162,7 @@ public class Database implements DataHandler {
     private Index metaIdIndex;
     private FileLock lock;
     private WriterThread writer;
-    private boolean starting;
+    private volatile boolean starting;
     private TraceSystem traceSystem;
     private Trace trace;
     private final FileLockMethod fileLockMethod;
@@ -179,7 +181,7 @@ public class Database implements DataHandler {
     private int allowLiterals = Constants.ALLOW_LITERALS_ALL;
 
     private int powerOffCount = initialPowerOffCount;
-    private int closeDelay;
+    private volatile int closeDelay;
     private DelayedDatabaseCloser delayedCloser;
     private volatile boolean closing;
     private boolean ignoreCase;
@@ -229,6 +231,7 @@ public class Database implements DataHandler {
     private int queryStatisticsMaxEntries = Constants.QUERY_STATISTICS_MAX_ENTRIES;
     private QueryStatisticsData queryStatisticsData;
     private RowFactory rowFactory = RowFactory.DEFAULT;
+    private LocalResultFactory resultFactory = LocalResultFactory.DEFAULT;
 
     private Authenticator authenticator;
 
@@ -284,7 +287,10 @@ public class Database implements DataHandler {
         }
         String modeName = ci.removeProperty("MODE", null);
         if (modeName != null) {
-            this.mode = Mode.getInstance(modeName);
+            mode = Mode.getInstance(modeName);
+            if (mode == null) {
+                throw DbException.get(ErrorCode.UNKNOWN_MODE_1, modeName);
+            }
         }
         this.logMode =
                 ci.getProperty("LOG", PageStore.LOG_MODE_SYNC);
@@ -363,6 +369,14 @@ public class Database implements DataHandler {
 
     public void setRowFactory(RowFactory rowFactory) {
         this.rowFactory = rowFactory;
+    }
+
+    public LocalResultFactory getResultFactory() {
+        return resultFactory;
+    }
+
+    public void setResultFactory(LocalResultFactory resultFactory) {
+        this.resultFactory = resultFactory;
     }
 
     public static void setInitialPowerOffCount(int count) {
@@ -535,13 +549,15 @@ public class Database implements DataHandler {
                 if (store != null) {
                     store.closeImmediately();
                 }
-                if (pageStore != null) {
-                    try {
-                        pageStore.close();
-                    } catch (DbException e) {
-                        // ignore
+                synchronized(this) {
+                    if (pageStore != null) {
+                        try {
+                            pageStore.close();
+                        } catch (DbException e) {
+                            // ignore
+                        }
+                        pageStore = null;
                     }
-                    pageStore = null;
                 }
                 if (lock != null) {
                     stopServer();
@@ -626,7 +642,7 @@ public class Database implements DataHandler {
                 n = tokenizer.nextToken();
             }
         }
-        if (n == null || n.length() == 0) {
+        if (n == null || n.isEmpty()) {
             n = "unnamed";
         }
         return dbSettings.databaseToUpper ? StringUtils.toUpperEnglish(n) : n;
@@ -786,10 +802,10 @@ public class Database implements DataHandler {
         data.create = create;
         data.isHidden = true;
         data.session = systemSession;
+        starting = true;
         meta = mainSchema.createTable(data);
         handleUpgradeIssues();
         IndexColumn[] pkCols = IndexColumn.wrap(new Column[] { columnId });
-        starting = true;
         metaIdIndex = meta.addIndex(systemSession, "SYS_ID",
                 0, pkCols, IndexType.createPrimaryKey(
                 false, false), true, null);
@@ -953,12 +969,15 @@ public class Database implements DataHandler {
         }
     }
 
-    private synchronized void addMeta(Session session, DbObject obj) {
+    private void addMeta(Session session, DbObject obj) {
+        assert Thread.holdsLock(this);
         int id = obj.getId();
         if (id > 0 && !starting && !obj.isTemporary()) {
             Row r = meta.getTemplateRow();
             MetaRecord.populateRowFromDBObject(obj, r);
-            objectIds.set(id);
+            synchronized (objectIds) {
+                objectIds.set(id);
+            }
             if (SysProperties.CHECK) {
                 verifyMetaLocked(session);
             }
@@ -1049,7 +1068,7 @@ public class Database implements DataHandler {
      * @param session the session
      * @param id the id of the object to remove
      */
-    public synchronized void removeMeta(Session session, int id) {
+    public void removeMeta(Session session, int id) {
         if (id > 0 && !starting) {
             SearchRow r = meta.getTemplateSimpleRow(false);
             r.setValue(0, ValueInt.get(id));
@@ -1057,10 +1076,8 @@ public class Database implements DataHandler {
             try {
                 Cursor cursor = metaIdIndex.find(session, r, r);
                 if (cursor.next()) {
-                    if (SysProperties.CHECK) {
-                        if (lockMode != Constants.LOCK_MODE_OFF && !wasLocked) {
-                            throw DbException.throwInternalError();
-                        }
+                    if (lockMode != Constants.LOCK_MODE_OFF && !wasLocked) {
+                        throw DbException.throwInternalError();
                     }
                     Row found = cursor.get();
                     meta.removeRow(session, found);
@@ -1075,7 +1092,25 @@ public class Database implements DataHandler {
                     unlockMeta(session);
                 }
             }
-            objectIds.clear(id);
+            if (isMVStore()) {
+                // release of the object id has to be postponed until the end of the transaction,
+                // otherwise it might be re-used prematurely, and it would make
+                // rollback impossible or lead to MVMaps name collision,
+                // so until then ids are accumulated within session
+                session.scheduleDatabaseObjectIdForRelease(id);
+            } else {
+                // but PageStore, on the other hand, for reasons unknown to me,
+                // requires immediate id release
+                synchronized (this) {
+                    objectIds.clear(id);
+                }
+            }
+        }
+    }
+
+    void releaseDatabaseObjectIds(BitSet idsToRelease) {
+        synchronized (objectIds) {
+            objectIds.andNot(idsToRelease);
         }
     }
 
@@ -1098,8 +1133,8 @@ public class Database implements DataHandler {
         case DbObject.SCHEMA:
             result = schemas;
             break;
-        case DbObject.USER_DATATYPE:
-            result = userDataTypes;
+        case DbObject.DOMAIN:
+            result = domains;
             break;
         case DbObject.COMMENT:
             result = comments;
@@ -1228,13 +1263,13 @@ public class Database implements DataHandler {
     }
 
     /**
-     * Get the user defined data type if it exists, or null if not.
+     * Get the domain if it exists, or null if not.
      *
-     * @param name the name of the user defined data type
-     * @return the user defined data type or null
+     * @param name the name of the domain
+     * @return the domain or null
      */
-    public UserDataType findUserDataType(String name) {
-        return userDataTypes.get(name);
+    public Domain findDomain(String name) {
+        return domains.get(name);
     }
 
     /**
@@ -1307,7 +1342,7 @@ public class Database implements DataHandler {
     }
 
     private synchronized void closeAllSessionsException(Session except) {
-        Session[] all = userSessions.toArray(new Session[userSessions.size()]);
+        Session[] all = userSessions.toArray(EMPTY_SESSION_ARRAY);
         for (Session s : all) {
             if (s != except) {
                 try {
@@ -1494,16 +1529,26 @@ public class Database implements DataHandler {
                 }
             }
             reconnectModified(false);
-            if (store != null && store.getMvStore() != null && !store.getMvStore().isClosed()) {
-                long maxCompactTime = dbSettings.maxCompactTime;
-                if (compactMode == CommandInterface.SHUTDOWN_COMPACT) {
-                    store.compactFile(dbSettings.maxCompactTime);
-                } else if (compactMode == CommandInterface.SHUTDOWN_DEFRAG) {
-                    maxCompactTime = Long.MAX_VALUE;
-                } else if (getSettings().defragAlways) {
-                    maxCompactTime = Long.MAX_VALUE;
+            if (store != null) {
+                MVStore mvStore = store.getMvStore();
+                if (mvStore != null && !mvStore.isClosed()) {
+                    boolean compactFully =
+                            compactMode == CommandInterface.SHUTDOWN_COMPACT ||
+                            compactMode == CommandInterface.SHUTDOWN_DEFRAG ||
+                            getSettings().defragAlways;
+                    if (!compactFully && !mvStore.isReadOnly()) {
+                        if (dbSettings.maxCompactTime > 0) {
+                            try {
+                                store.compactFile(dbSettings.maxCompactTime);
+                            } catch (Throwable t) {
+                                trace.error(t, "compactFile");
+                            }
+                        } else {
+                            mvStore.commit();
+                        }
+                    }
+                    store.close(compactFully);
                 }
-                store.close(maxCompactTime);
             }
             if (systemSession != null) {
                 systemSession.close();
@@ -1573,9 +1618,13 @@ public class Database implements DataHandler {
      *
      * @return the id
      */
-    public synchronized int allocateObjectId() {
-        int i = objectIds.nextClearBit(0);
-        objectIds.set(i);
+    public int allocateObjectId() {
+        Object lock = isMVStore() ? objectIds : this;
+        int i;
+        synchronized (lock) {
+            i = objectIds.nextClearBit(0);
+            objectIds.set(i);
+        }
         return i;
     }
 
@@ -1692,8 +1741,8 @@ public class Database implements DataHandler {
         return new ArrayList<>(settings.values());
     }
 
-    public ArrayList<UserDataType> getAllUserDataTypes() {
-        return new ArrayList<>(userDataTypes.values());
+    public ArrayList<Domain> getAllDomains() {
+        return new ArrayList<>(domains.values());
     }
 
     public ArrayList<User> getAllUsers() {
@@ -1763,18 +1812,18 @@ public class Database implements DataHandler {
      */
     public void updateMeta(Session session, DbObject obj) {
         if (isMVStore()) {
-            synchronized (this) {
-                int id = obj.getId();
-                if (id > 0) {
-                    if (!starting && !obj.isTemporary()) {
-                        Row newRow = meta.getTemplateRow();
-                        MetaRecord.populateRowFromDBObject(obj, newRow);
-                        Row oldRow = metaIdIndex.getRow(session, id);
-                        if (oldRow != null) {
-                            meta.updateRow(session, oldRow, newRow);
-                        }
+            int id = obj.getId();
+            if (id > 0) {
+                if (!starting && !obj.isTemporary()) {
+                    Row newRow = meta.getTemplateRow();
+                    MetaRecord.populateRowFromDBObject(obj, newRow);
+                    Row oldRow = metaIdIndex.getRow(session, id);
+                    if (oldRow != null) {
+                        meta.updateRow(session, oldRow, newRow);
                     }
-                    // for temporary objects
+                }
+                // for temporary objects
+                synchronized (objectIds) {
                     objectIds.set(id);
                 }
             }
@@ -2026,7 +2075,7 @@ public class Database implements DataHandler {
         }
         cacheSize = kb;
         if (pageStore != null) {
-            pageStore.getCache().setMaxMemory(kb);
+            pageStore.setMaxCacheMemory(kb);
         }
         if (store != null) {
             store.setCacheSize(Math.max(1, kb));
@@ -2223,7 +2272,7 @@ public class Database implements DataHandler {
     }
 
     public void setEventListenerClass(String className) {
-        if (className == null || className.length() == 0) {
+        if (className == null || className.isEmpty()) {
             eventListener = null;
         } else {
             try {
@@ -2336,7 +2385,7 @@ public class Database implements DataHandler {
         return lockMode;
     }
 
-    public synchronized void setCloseDelay(int value) {
+    public void setCloseDelay(int value) {
         this.closeDelay = value;
     }
 
@@ -2619,19 +2668,21 @@ public class Database implements DataHandler {
             }
             return null;
         }
-        if (pageStore == null) {
-            pageStore = new PageStore(this, databaseName +
-                    Constants.SUFFIX_PAGE_FILE, accessModeData, cacheSize);
-            if (pageSize != Constants.DEFAULT_PAGE_SIZE) {
-                pageStore.setPageSize(pageSize);
+        synchronized (this) {
+            if (pageStore == null) {
+                pageStore = new PageStore(this, databaseName +
+                        Constants.SUFFIX_PAGE_FILE, accessModeData, cacheSize);
+                if (pageSize != Constants.DEFAULT_PAGE_SIZE) {
+                    pageStore.setPageSize(pageSize);
+                }
+                if (!readOnly && fileLockMethod == FileLockMethod.FS) {
+                    pageStore.setLockFile(true);
+                }
+                pageStore.setLogMode(logMode);
+                pageStore.open();
             }
-            if (!readOnly && fileLockMethod == FileLockMethod.FS) {
-                pageStore.setLockFile(true);
-            }
-            pageStore.setLogMode(logMode);
-            pageStore.open();
+            return pageStore;
         }
-        return pageStore;
     }
 
     /**
@@ -2727,7 +2778,7 @@ public class Database implements DataHandler {
         }
         long now = System.nanoTime();
         if (now > reconnectCheckNext + reconnectCheckDelayNs) {
-            if (SysProperties.CHECK && checkpointAllowed < 0) {
+            if (checkpointAllowed < 0) {
                 DbException.throwInternalError(Integer.toString(checkpointAllowed));
             }
             synchronized (reconnectSync) {
@@ -2796,8 +2847,7 @@ public class Database implements DataHandler {
         }
         synchronized (reconnectSync) {
             if (reconnectModified(true)) {
-                checkpointAllowed++;
-                if (SysProperties.CHECK && checkpointAllowed > 20) {
+                if (++checkpointAllowed > 20) {
                     throw DbException.throwInternalError(Integer.toString(checkpointAllowed));
                 }
                 return true;
@@ -2819,7 +2869,7 @@ public class Database implements DataHandler {
         synchronized (reconnectSync) {
             checkpointAllowed--;
         }
-        if (SysProperties.CHECK && checkpointAllowed < 0) {
+        if (checkpointAllowed < 0) {
             throw DbException.throwInternalError(Integer.toString(checkpointAllowed));
         }
     }
@@ -2880,27 +2930,32 @@ public class Database implements DataHandler {
         if (log < 0 || log > 2) {
             throw DbException.getInvalidValueException("LOG", log);
         }
-        if (pageStore != null) {
-            if (log != PageStore.LOG_MODE_SYNC ||
-                    pageStore.getLogMode() != PageStore.LOG_MODE_SYNC) {
-                // write the log mode in the trace file when enabling or
-                // disabling a dangerous mode
-                trace.error(null, "log {0}", log);
-            }
-            this.logMode = log;
-            pageStore.setLogMode(log);
-        }
         if (store != null) {
             this.logMode = log;
+            return;
+        }
+        synchronized (this) {
+            if (pageStore != null) {
+                if (log != PageStore.LOG_MODE_SYNC ||
+                        pageStore.getLogMode() != PageStore.LOG_MODE_SYNC) {
+                    // write the log mode in the trace file when enabling or
+                    // disabling a dangerous mode
+                    trace.error(null, "log {0}", log);
+                }
+                this.logMode = log;
+                pageStore.setLogMode(log);
+            }
         }
     }
 
     public int getLogMode() {
-        if (pageStore != null) {
-            return pageStore.getLogMode();
-        }
         if (store != null) {
             return logMode;
+        }
+        synchronized (this) {
+            if (pageStore != null) {
+                return pageStore.getLogMode();
+            }
         }
         return PageStore.LOG_MODE_OFF;
     }

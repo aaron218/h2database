@@ -10,7 +10,7 @@ select * from test where id in (select id from test order by 'x');
 > ID
 > --
 > 1
-> rows (ordered): 1
+> rows: 1
 
 drop table test;
 > ok
@@ -63,7 +63,7 @@ AND studentID = 2;
 > SUM(POINTS)
 > -----------
 > 30
-> rows (ordered): 1
+> rows: 1
 
 SELECT eventID X FROM RESULTS
 WHERE studentID = 2
@@ -85,7 +85,7 @@ AND studentID = 2;
 > SUM(R.POINTS)
 > -------------
 > 30
-> rows (ordered): 1
+> rows: 1
 
 drop table results;
 > ok
@@ -97,7 +97,7 @@ create table test(id int, name varchar) as select 1, 'a';
 > ID
 > --
 > 1
-> rows (ordered): 1
+> rows: 1
 
 drop table test;
 > ok
@@ -162,7 +162,7 @@ select id from test where name in(null, null);
 select * from (select * from test order by name limit 1) where id < 10;
 > ID NAME
 > -- ----
-> rows (ordered): 0
+> rows: 0
 
 drop table test;
 > ok
@@ -281,21 +281,21 @@ create table test(id int primary key, name varchar(255), row_number int);
 insert into test values(1, 'hello', 10), (2, 'world', 20);
 > update count: 2
 
-select row_number() over(), id, name from test order by id;
+select rownum(), id, name from test order by id;
 > ROWNUM() ID NAME
 > -------- -- -----
 > 1        1  hello
 > 2        2  world
 > rows (ordered): 2
 
-select row_number() over(), id, name from test order by name;
+select rownum(), id, name from test order by name;
 > ROWNUM() ID NAME
 > -------- -- -----
 > 1        1  hello
 > 2        2  world
 > rows (ordered): 2
 
-select row_number() over(), id, name from test order by name desc;
+select rownum(), id, name from test order by name desc;
 > ROWNUM() ID NAME
 > -------- -- -----
 > 2        2  world
@@ -335,7 +335,7 @@ select * from dual where x in (select x from dual group by x order by max(x));
 > X
 > -
 > 1
-> rows (ordered): 1
+> rows: 1
 
 create table test(d decimal(1, 2));
 > exception INVALID_VALUE_SCALE_PRECISION
@@ -366,14 +366,14 @@ explain select -cast(0 as real), -cast(0 as double);
 
 select () empty;
 > EMPTY
-> -----
-> ()
+> ------
+> ROW ()
 > rows: 1
 
 select (1,) one_element;
 > ONE_ELEMENT
 > -----------
-> (1)
+> ROW (1)
 > rows: 1
 
 select (1) one;
@@ -742,7 +742,7 @@ select * from(select 1 from system_range(1, 2) group by sin(x) order by sin(x));
 > -
 > 1
 > 1
-> rows (ordered): 2
+> rows: 2
 
 create table parent as select 1 id, 2 x;
 > ok
@@ -757,7 +757,7 @@ drop table parent, child;
 > ok
 
 create domain integer as varchar;
-> exception USER_DATA_TYPE_ALREADY_EXISTS_1
+> exception DOMAIN_ALREADY_EXISTS_1
 
 create domain int as varchar;
 > ok
@@ -1190,7 +1190,7 @@ drop table p;
 > X
 > -
 > 1
-> rows (ordered): 1
+> rows: 1
 
 create table test(a int, b int default 1);
 > ok
@@ -1401,9 +1401,9 @@ insert into test values(1, (1, 1)), (2, (1, 2)), (3, (1, 1, 1));
 select * from test order by data;
 > ID DATA
 > -- ---------
-> 1  (1, 1)
-> 3  (1, 1, 1)
-> 2  (1, 2)
+> 1  [1, 1]
+> 3  [1, 1, 1]
+> 2  [1, 2]
 > rows (ordered): 3
 
 drop table test;
@@ -2003,9 +2003,9 @@ drop table people, cars;
 > ok
 
 select (1, 2);
-> 1, 2
-> ------
-> (1, 2)
+> ROW (1, 2)
+> ----------
+> ROW (1, 2)
 > rows: 1
 
 create table array_test(x array);
@@ -2017,7 +2017,7 @@ insert into array_test values((1, 2, 3)), ((2, 3, 4));
 select * from array_test where x = (1, 2, 3);
 > X
 > ---------
-> (1, 2, 3)
+> [1, 2, 3]
 > rows: 1
 
 drop table array_test;
@@ -2522,6 +2522,7 @@ insert into address(id, name, name2) values(1, 'test@abc', 'test@gmail.com');
 insert into address(id, name, name2) values(2, 'test@abc', 'test@acme');
 > exception CHECK_CONSTRAINT_VIOLATED_1
 
+@reconnect
 insert into address(id, name, name2) values(3, 'test_abc', 'test@gmail');
 > exception CHECK_CONSTRAINT_VIOLATED_1
 
@@ -2812,7 +2813,7 @@ select rownum, * from (select * from test where id>1 order by id desc);
 > -------- -- ----
 > 1        3  33
 > 2        2  22
-> rows (ordered): 2
+> rows: 2
 
 update test set name='x' where rownum<2;
 > update count: 1
@@ -3176,7 +3177,7 @@ drop table test;
 call select 1.0/3.0*3.0, 100.0/2.0, -25.0/100.0, 0.0/3.0, 6.9/2.0, 0.72179425150347250912311550800000 / 5314251955.21;
 > SELECT 0.999999999999999999999999990, 50, -0.25, 0, 3.45, 1.35822361752313607260107721120531135706133161972E-10 FROM SYSTEM_RANGE(1, 1) /* PUBLIC.RANGE_INDEX */ /* scanCount: 2 */
 > -----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-> (0.999999999999999999999999990, 50, -0.25, 0, 3.45, 1.35822361752313607260107721120531135706133161972E-10)
+> ROW (0.999999999999999999999999990, 50, -0.25, 0, 3.45, 1.35822361752313607260107721120531135706133161972E-10)
 > rows: 1
 
 call (select x from dual where x is null);
@@ -3253,8 +3254,11 @@ select count(*) from test where id in ((select id from test));
 select count(*) from test where id = ((select id from test));
 > exception SCALAR_SUBQUERY_CONTAINS_MORE_THAN_ONE_ROW
 
-select count(*) from test where id = ((select id from test), 1);
+select count(*) from test where id = ARRAY [(select id from test), 1];
 > exception COMPARING_ARRAY_TO_SCALAR
+
+select count(*) from test where id = ((select id from test fetch first row only), 1);
+> exception COLUMN_COUNT_DOES_NOT_MATCH
 
 select (select id from test where 1=0) from test;
 > SELECT ID FROM PUBLIC.TEST /* PUBLIC.TEST.tableScan: FALSE */ WHERE FALSE
@@ -3288,7 +3292,7 @@ select select a from test order by id;
 > SELECT A FROM PUBLIC.TEST /* PUBLIC.PRIMARY_KEY_2 */ /* scanCount: 2 */ ORDER BY =ID /* index sorted */
 > -------------------------------------------------------------------------------------------------------
 > TRUE
-> rows (ordered): 1
+> rows: 1
 
 insert into test values(2, 'N');
 > update count: 1
@@ -4314,8 +4318,8 @@ update test set (id, name)=(select id+1, name || 'Ho' from test t1 where test.id
 > update count: 2
 
 explain update test set (id, name)=(id+1, name || 'Hi');
-#+mvStore#>> UPDATE PUBLIC.TEST /* PUBLIC.TEST.tableScan */ SET ID = ARRAY_GET(((ID + 1), (NAME || 'Hi')), 1), NAME = ARRAY_GET(((ID + 1), (NAME || 'Hi')), 2)
-#-mvStore#>> UPDATE PUBLIC.TEST /* PUBLIC.PRIMARY_KEY_2 */ SET ID = ARRAY_GET(((ID + 1), (NAME || 'Hi')), 1), NAME = ARRAY_GET(((ID + 1), (NAME || 'Hi')), 2)
+#+mvStore#>> UPDATE PUBLIC.TEST /* PUBLIC.TEST.tableScan */ SET ID = ARRAY_GET(ROW ((ID + 1), (NAME || 'Hi')), 1), NAME = ARRAY_GET(ROW ((ID + 1), (NAME || 'Hi')), 2)
+#-mvStore#>> UPDATE PUBLIC.TEST /* PUBLIC.PRIMARY_KEY_2 */ SET ID = ARRAY_GET(ROW ((ID + 1), (NAME || 'Hi')), 1), NAME = ARRAY_GET(ROW ((ID + 1), (NAME || 'Hi')), 2)
 
 explain update test set (id, name)=(select id+1, name || 'Ho' from test t1 where test.id=t1.id);
 #+mvStore#>> UPDATE PUBLIC.TEST /* PUBLIC.TEST.tableScan */ SET ID = ARRAY_GET((SELECT (ID + 1), (NAME || 'Ho') FROM PUBLIC.TEST T1 /* PUBLIC.PRIMARY_KEY_2: ID = TEST.ID */ WHERE TEST.ID = T1.ID), 1), NAME = ARRAY_GET((SELECT (ID + 1), (NAME || 'Ho') FROM PUBLIC.TEST T1 /* PUBLIC.PRIMARY_KEY_2: ID = TEST.ID */ WHERE TEST.ID = T1.ID), 2)
@@ -6132,11 +6136,11 @@ SELECT * FROM TEST;
 > rows: 4
 
 SELECT XD+1, XD-1, XD-XD FROM TEST;
-> DATEADD('DAY', 1, XD) DATEADD('DAY', -1, XD) DATEDIFF('DAY', XD, XD)
-> --------------------- ---------------------- -----------------------
-> 0001-02-04            0001-02-02             0
-> 0004-05-07            0004-05-05             0
-> 2000-01-01            1999-12-30             0
+> DATEADD('DAY', 1, XD) DATEADD('DAY', -1, XD) XD - XD
+> --------------------- ---------------------- ----------------
+> 0001-02-04            0001-02-02             INTERVAL '0' DAY
+> 0004-05-07            0004-05-05             INTERVAL '0' DAY
+> 2000-01-01            1999-12-30             INTERVAL '0' DAY
 > null                  null                   null
 > rows: 4
 
@@ -6575,9 +6579,9 @@ select * from s;
 > rows: 1
 
 select some(y>10), every(y>10), min(y), max(y) from t;
-> BOOL_OR(Y > 10.0) BOOL_AND(Y > 10.0) MIN(Y) MAX(Y)
-> ----------------- ------------------ ------ ------
-> null              null               null   null
+> ANY(Y > 10.0) EVERY(Y > 10.0) MIN(Y) MAX(Y)
+> ------------- --------------- ------ ------
+> null          null            null   null
 > rows: 1
 
 insert into t values(1000000004, 4);
@@ -6633,9 +6637,9 @@ stddev_pop(distinct y) s_py, stddev_samp(distinct y) s_sy, var_pop(distinct y) v
 > rows: 1
 
 select some(y>10), every(y>10), min(y), max(y) from t;
-> BOOL_OR(Y > 10.0) BOOL_AND(Y > 10.0) MIN(Y) MAX(Y)
-> ----------------- ------------------ ------ ------
-> TRUE              FALSE              4.0    16.0
+> ANY(Y > 10.0) EVERY(Y > 10.0) MIN(Y) MAX(Y)
+> ------------- --------------- ------ ------
+> TRUE          FALSE           4.0    16.0
 > rows: 1
 
 drop view s;
@@ -6675,7 +6679,7 @@ SELECT GROUP_CONCAT(ID ORDER BY ID) FROM TEST;
 > GROUP_CONCAT(ID ORDER BY ID)
 > ----------------------------
 > 1,2,3,4,5,6,7,8,9
-> rows (ordered): 1
+> rows: 1
 
 SELECT STRING_AGG(ID,';') FROM TEST;
 > GROUP_CONCAT(ID SEPARATOR ';')
@@ -7944,9 +7948,9 @@ insert into test values (2014, 'execution'), (2015, 'execution'), (2016, 'execut
 select * from test where year in (select distinct year from test order by year desc limit 1 offset 0);
 > YEAR ACTION
 > ---- ---------
-> 2016 order
 > 2016 execution
-> rows (ordered): 2
+> 2016 order
+> rows: 2
 
 drop table test;
 > ok

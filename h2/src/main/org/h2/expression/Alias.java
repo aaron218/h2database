@@ -42,8 +42,8 @@ public class Alias extends Expression {
     }
 
     @Override
-    public void mapColumns(ColumnResolver resolver, int level) {
-        expr.mapColumns(resolver, level);
+    public void mapColumns(ColumnResolver resolver, int level, int state) {
+        expr.mapColumns(resolver, level, state);
     }
 
     @Override
@@ -78,13 +78,14 @@ public class Alias extends Expression {
     }
 
     @Override
-    public String getSQL() {
-        return expr.getSQL() + " AS " + Parser.quoteIdentifier(alias);
+    public StringBuilder getSQL(StringBuilder builder) {
+        expr.getSQL(builder).append(" AS ");
+        return Parser.quoteIdentifier(builder, alias);
     }
 
     @Override
-    public void updateAggregate(Session session) {
-        expr.updateAggregate(session);
+    public void updateAggregate(Session session, int stage) {
+        expr.updateAggregate(session, stage);
     }
 
     @Override
@@ -110,7 +111,7 @@ public class Alias extends Expression {
     @Override
     public String getTableName() {
         if (aliasColumnName) {
-            return super.getTableName();
+            return null;
         }
         return expr.getTableName();
     }
@@ -118,7 +119,7 @@ public class Alias extends Expression {
     @Override
     public String getColumnName() {
         if (!(expr instanceof ExpressionColumn) || aliasColumnName) {
-            return super.getColumnName();
+            return alias;
         }
         return expr.getColumnName();
     }

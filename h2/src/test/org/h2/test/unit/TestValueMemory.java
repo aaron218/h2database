@@ -12,14 +12,16 @@ import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.IdentityHashMap;
 import java.util.Random;
+
+import org.h2.api.IntervalQualifier;
 import org.h2.api.JavaObjectSerializer;
 import org.h2.engine.Constants;
+import org.h2.result.SimpleResult;
 import org.h2.store.DataHandler;
 import org.h2.store.FileStore;
 import org.h2.store.LobStorageFrontend;
 import org.h2.test.TestBase;
 import org.h2.test.utils.MemoryFootprint;
-import org.h2.tools.SimpleResultSet;
 import org.h2.util.SmallLRUCache;
 import org.h2.util.TempFileDeleter;
 import org.h2.util.Utils;
@@ -36,10 +38,12 @@ import org.h2.value.ValueDouble;
 import org.h2.value.ValueFloat;
 import org.h2.value.ValueGeometry;
 import org.h2.value.ValueInt;
+import org.h2.value.ValueInterval;
 import org.h2.value.ValueJavaObject;
 import org.h2.value.ValueLong;
 import org.h2.value.ValueNull;
 import org.h2.value.ValueResultSet;
+import org.h2.value.ValueRow;
 import org.h2.value.ValueShort;
 import org.h2.value.ValueString;
 import org.h2.value.ValueStringFixed;
@@ -81,6 +85,10 @@ public class TestValueMemory extends TestBase implements DataHandler {
                 // experiment
                 continue;
             }
+            if (i == Value.ENUM) {
+                // TODO ENUM
+                continue;
+            }
             Value v = create(i);
             String s = "type: " + v.getType() +
                     " calculated: " + v.getMemory() +
@@ -92,6 +100,10 @@ public class TestValueMemory extends TestBase implements DataHandler {
             if (i == 23) {
                 // this used to be "TIMESTAMP UTC", which was a short-lived
                 // experiment
+                continue;
+            }
+            if (i == Value.ENUM) {
+                // TODO ENUM
                 continue;
             }
             Value v = create(i);
@@ -197,16 +209,12 @@ public class TestValueMemory extends TestBase implements DataHandler {
             String s = randomString(len);
             return getLobStorage().createClob(new StringReader(s), len);
         }
-        case Value.ARRAY: {
-            int len = random.nextInt(20);
-            Value[] list = new Value[len];
-            for (int i = 0; i < list.length; i++) {
-                list[i] = create(Value.STRING);
-            }
-            return ValueArray.get(list);
-        }
+        case Value.ARRAY:
+            return ValueArray.get(createArray());
+        case Value.ROW:
+            return ValueRow.get(createArray());
         case Value.RESULT_SET:
-            return ValueResultSet.get(new SimpleResultSet());
+            return ValueResultSet.get(new SimpleResult());
         case Value.JAVA_OBJECT:
             return ValueJavaObject.getNoCopy(null, randomBytes(random.nextInt(100)), this);
         case Value.UUID:
@@ -219,9 +227,37 @@ public class TestValueMemory extends TestBase implements DataHandler {
             }
             return ValueGeometry.get("POINT (" + random.nextInt(100) + " " +
                     random.nextInt(100) + ")");
+        case Value.INTERVAL_YEAR:
+        case Value.INTERVAL_MONTH:
+        case Value.INTERVAL_DAY:
+        case Value.INTERVAL_HOUR:
+        case Value.INTERVAL_MINUTE:
+            return ValueInterval.from(IntervalQualifier.valueOf(type - Value.INTERVAL_YEAR),
+                    random.nextBoolean(), random.nextInt(Integer.MAX_VALUE), 0);
+        case Value.INTERVAL_SECOND:
+        case Value.INTERVAL_DAY_TO_SECOND:
+        case Value.INTERVAL_HOUR_TO_SECOND:
+        case Value.INTERVAL_MINUTE_TO_SECOND:
+            return ValueInterval.from(IntervalQualifier.valueOf(type - Value.INTERVAL_YEAR),
+                    random.nextBoolean(), random.nextInt(Integer.MAX_VALUE), random.nextInt(1_000_000_000));
+        case Value.INTERVAL_YEAR_TO_MONTH:
+        case Value.INTERVAL_DAY_TO_HOUR:
+        case Value.INTERVAL_DAY_TO_MINUTE:
+        case Value.INTERVAL_HOUR_TO_MINUTE:
+            return ValueInterval.from(IntervalQualifier.valueOf(type - Value.INTERVAL_YEAR),
+                    random.nextBoolean(), random.nextInt(Integer.MAX_VALUE), random.nextInt(12));
         default:
             throw new AssertionError("type=" + type);
         }
+    }
+
+    private Value[] createArray() throws SQLException {
+        int len = random.nextInt(20);
+        Value[] list = new Value[len];
+        for (int i = 0; i < list.length; i++) {
+            list[i] = create(Value.STRING);
+        }
+        return list;
     }
 
     private byte[] randomBytes(int len) {

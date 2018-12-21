@@ -33,6 +33,7 @@ import org.h2.store.InDoubtTransaction;
 import org.h2.store.fs.FileChannelInputStream;
 import org.h2.store.fs.FileUtils;
 import org.h2.table.TableBase;
+import org.h2.util.StringUtils;
 import org.h2.util.Utils;
 
 /**
@@ -267,7 +268,7 @@ public class MVTableEngine implements TableEngine {
                 if (mapName.startsWith("temp.")) {
                     mvStore.removeMap(mapName);
                 } else if (mapName.startsWith("table.") || mapName.startsWith("index.")) {
-                    int id = Integer.parseInt(mapName.substring(1 + mapName.indexOf('.')));
+                    int id = StringUtils.parseUInt31(mapName, mapName.indexOf('.') + 1, mapName.length());
                     if (!objectIds.get(id)) {
                         mvStore.removeMap(mapName);
                     }
@@ -359,19 +360,18 @@ public class MVTableEngine implements TableEngine {
          * fill rate are compacted, but old chunks are kept for some time, so
          * most likely the database file will not shrink.
          *
-         * @param maxCompactTime the maximum time in milliseconds to compact
+         * @param compactFully true if storage need to be compacted after closer
          */
-        public void close(long maxCompactTime) {
+        public void close(boolean compactFully) {
             try {
-                if (!mvStore.isClosed() && mvStore.getFileStore() != null) {
-                    boolean compactFully = false;
-                    if (!mvStore.getFileStore().isReadOnly()) {
+                FileStore fileStore = mvStore.getFileStore();
+                if (!mvStore.isClosed() && fileStore != null) {
+                    if (fileStore.isReadOnly()) {
+                        compactFully = false;
+                    } else {
                         transactionStore.close();
-                        if (maxCompactTime == Long.MAX_VALUE) {
-                            compactFully = true;
-                        }
                     }
-                    String fileName = mvStore.getFileStore().getFileName();
+                    String fileName = fileStore.getFileName();
                     mvStore.close();
                     if (compactFully && FileUtils.exists(fileName)) {
                         // the file could have been deleted concurrently,

@@ -402,6 +402,17 @@ public class ErrorCode {
      */
     public static final int COLUMN_NOT_FOUND_1 = 42122;
 
+    /**
+     * The error with code <code>42131</code> is thrown when
+     * identical expressions should be used, but different
+     * exceptions were found.
+     * Example:
+     * <pre>
+     * SELECT MODE(A ORDER BY B) FROM TEST;
+     * </pre>
+     */
+    public static final int IDENTICAL_EXPRESSIONS_SHOULD_BE_USED = 42131;
+
     // 0A: feature not supported
 
     // HZ: remote database access
@@ -1737,7 +1748,13 @@ public class ErrorCode {
      * CREATE DOMAIN EMAIL AS VARCHAR CHECK LOCATE('@', VALUE) > 0;
      * </pre>
      */
-    public static final int USER_DATA_TYPE_ALREADY_EXISTS_1 = 90119;
+    public static final int DOMAIN_ALREADY_EXISTS_1 = 90119;
+
+    /**
+     * Deprecated since 1.4.198. Use {@link #DOMAIN_ALREADY_EXISTS_1} instead.
+     */
+    @Deprecated
+    public static final int USER_DATA_TYPE_ALREADY_EXISTS_1 = DOMAIN_ALREADY_EXISTS_1;
 
     /**
      * The error with code <code>90120</code> is thrown when
@@ -1747,7 +1764,13 @@ public class ErrorCode {
      * DROP DOMAIN UNKNOWN;
      * </pre>
      */
-    public static final int USER_DATA_TYPE_NOT_FOUND_1 = 90120;
+    public static final int DOMAIN_NOT_FOUND_1 = 90120;
+
+    /**
+     * Deprecated since 1.4.198. Use {@link #DOMAIN_NOT_FOUND_1} instead.
+     */
+    @Deprecated
+    public static final int USER_DATA_TYPE_NOT_FOUND_1 = DOMAIN_NOT_FOUND_1;
 
     /**
      * The error with code <code>90121</code> is thrown when
@@ -1917,13 +1940,13 @@ public class ErrorCode {
 
     /**
      * The error with code <code>90136</code> is thrown when
-     * executing a query that used an unsupported outer join condition.
+     * trying to reference a window that does not exist.
      * Example:
      * <pre>
-     * SELECT * FROM DUAL A LEFT JOIN DUAL B ON B.X=(SELECT MAX(X) FROM DUAL);
+     * SELECT LEAD(X) OVER W FROM TEST;
      * </pre>
      */
-    public static final int UNSUPPORTED_OUTER_JOIN_CONDITION_1 = 90136;
+    public static final int WINDOW_NOT_FOUND_1 = 90136;
 
     /**
      * The error with code <code>90137</code> is thrown when
@@ -2007,8 +2030,20 @@ public class ErrorCode {
      */
     public static final int AUTHENTICATOR_NOT_AVAILABLE = 90144;
 
+    /**
+     * The error with code <code>90145</code> is thrown when trying to execute a
+     * SELECT statement with non-window aggregates, DISTINCT, GROUP BY, or
+     * HAVING clauses together with FOR UPDATE clause.
+     *
+     * <pre>
+     * SELECT DISTINCT NAME FOR UPDATE;
+     * SELECT MAX(VALUE) FOR UPDATE;
+     * </pre>
+     */
+    public static final int FOR_UPDATE_IS_NOT_ALLOWED_IN_DISTINCT_OR_GROUPED_SELECT = 90145;
 
-    // next is 90145
+
+    // next is 90146
 
     private ErrorCode() {
         // utility class
@@ -2068,6 +2103,7 @@ public class ErrorCode {
         case INDEX_NOT_FOUND_1: return "42S12";
         case DUPLICATE_COLUMN_NAME_1: return "42S21";
         case COLUMN_NOT_FOUND_1: return "42S22";
+        case IDENTICAL_EXPRESSIONS_SHOULD_BE_USED: return "42S31";
 
         // 0A: feature not supported
 

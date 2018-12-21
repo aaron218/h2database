@@ -54,8 +54,12 @@ public class TestCompatibility extends TestDb {
         testSybaseAndMSSQLServer();
         testIgnite();
 
+        testUnknownSet();
+
         conn.close();
         deleteDb("compatibility");
+
+        testUnknownURL();
     }
 
     private void testKeyAsColumnInMySQLMode() throws SQLException {
@@ -115,7 +119,7 @@ public class TestCompatibility extends TestDb {
         }
         Statement stat = conn.createStatement();
         stat.execute("create table test(id int primary key) as select 1");
-        assertThrows(ErrorCode.USER_DATA_TYPE_ALREADY_EXISTS_1, stat).
+        assertThrows(ErrorCode.DOMAIN_ALREADY_EXISTS_1, stat).
                 execute("create domain int as varchar");
         conn.close();
         conn = getConnection("compatibility");
@@ -273,7 +277,7 @@ public class TestCompatibility extends TestDb {
             try {
                 stat.execute("CREATE TABLE TEST(COL " + type + ")");
                 fail("Expect type " + type + " to not exist in PostgreSQL mode");
-            } catch (org.h2.jdbc.JdbcSQLException e) {
+            } catch (SQLException e) {
                 /* Expected! */
             }
         }
@@ -660,4 +664,21 @@ public class TestCompatibility extends TestDb {
         stat.execute("DROP TABLE IF EXISTS TEST");
         stat.execute("create table test(id int, v1 varchar, v2 long, primary key(v1, id), shard key (id))");
     }
+
+    private void testUnknownSet() throws SQLException {
+        Statement stat = conn.createStatement();
+        assertThrows(ErrorCode.UNKNOWN_MODE_1, stat).execute("SET MODE Unknown");
+    }
+
+    private void testUnknownURL() throws SQLException {
+        try {
+            getConnection("compatibility;MODE=Unknown").close();
+            deleteDb("compatibility");
+        } catch (SQLException ex) {
+            assertEquals(ErrorCode.UNKNOWN_MODE_1, ex.getErrorCode());
+            return;
+        }
+        fail();
+    }
+
 }

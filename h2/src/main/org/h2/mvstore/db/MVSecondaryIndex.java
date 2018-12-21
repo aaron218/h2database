@@ -58,6 +58,7 @@ public final class MVSecondaryIndex extends BaseIndex implements MVIndex {
         // even for unique indexes, as some of the index columns could be null
         keyColumns = columns.length + 1;
         String mapName = "index." + getId();
+        assert db.isStarting() || !db.getStore().getMvStore().getMetaMap().containsKey("name." + mapName);
         int[] sortTypes = new int[keyColumns];
         for (int i = 0; i < columns.length; i++) {
             sortTypes[i] = columns[i].sortType;
@@ -287,7 +288,7 @@ public final class MVSecondaryIndex extends BaseIndex implements MVIndex {
             int idx = c.getColumnId();
             Value v = r.getValue(idx);
             if (v != null) {
-                array[i] = v.convertTo(c.getType(), -1, database.getMode(), null, c.getEnumerators());
+                array[i] = v.convertTo(c.getType(), -1, database.getMode(), null, c.getExtTypeInfo());
             }
         }
         array[keyColumns - 1] = key != null ? key : ValueLong.get(r.getKey());

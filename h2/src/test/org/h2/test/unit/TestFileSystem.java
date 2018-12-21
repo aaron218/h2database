@@ -83,6 +83,7 @@ public class TestFileSystem extends TestDb {
         String f = "split:10:" + getBaseDir() + "/fs";
         FileUtils.toRealPath(f);
         testFileSystem(getBaseDir() + "/fs");
+        testFileSystem("async:" + getBaseDir() + "/fs");
         testFileSystem("memFS:");
         testFileSystem("memLZF:");
         testFileSystem("nioMemFS:");
@@ -101,10 +102,7 @@ public class TestFileSystem extends TestDb {
                 testFileSystem("split:" + getBaseDir() + "/fs");
                 testFileSystem("split:nioMapped:" + getBaseDir() + "/fs");
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-            throw e;
-        } catch (Error e) {
+        } catch (Exception | Error e) {
             e.printStackTrace();
             throw e;
         } finally {

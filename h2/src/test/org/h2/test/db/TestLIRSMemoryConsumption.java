@@ -1,3 +1,8 @@
+/*
+ * Copyright 2004-2018 H2 Group. Multiple-Licensed under the MPL 2.0,
+ * and the EPL 1.0 (http://h2database.com/html/license.html).
+ * Initial Developer: H2 Group
+ */
 package org.h2.test.db;
 
 import org.h2.mvstore.cache.CacheLongKeyLIRS;
@@ -97,7 +102,7 @@ public class TestLIRSMemoryConsumption extends TestDb {
         return 2560;
     }
 
-    private long getMemUsedKb() {
+    private static long getMemUsedKb() {
         Runtime rt = Runtime.getRuntime();
         long memory = Long.MAX_VALUE;
         for (int i = 0; i < 8; i++) {

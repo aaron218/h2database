@@ -30,6 +30,8 @@ import java.util.GregorianCalendar;
 import java.util.UUID;
 
 import org.h2.api.ErrorCode;
+import org.h2.api.Interval;
+import org.h2.api.IntervalQualifier;
 import org.h2.api.Trigger;
 import org.h2.engine.SysProperties;
 import org.h2.message.DbException;
@@ -180,6 +182,8 @@ public class TestPreparedStatement extends TestDb {
         testDateTime8(conn);
         testOffsetDateTime8(conn);
         testInstant8(conn);
+        testInterval(conn);
+        testInterval8(conn);
         testArray(conn);
         testSetObject(conn);
         testPreparedSubquery(conn);
@@ -194,6 +198,7 @@ public class TestPreparedStatement extends TestDb {
         testParameterMetaData(conn);
         testColumnMetaDataWithEquals(conn);
         testColumnMetaDataWithIn(conn);
+        testValueResultSet(conn);
         conn.close();
         testPreparedStatementWithLiteralsNone();
         testPreparedStatementWithIndexedParameterAndLiteralsNone();
@@ -902,6 +907,75 @@ public class TestPreparedStatement extends TestDb {
         rs.close();
     }
 
+    private void testInterval(Connection conn) throws SQLException {
+        PreparedStatement prep = conn.prepareStatement("SELECT ?");
+        Interval interval = new Interval(IntervalQualifier.MINUTE, false, 100, 0);
+        prep.setObject(1, interval);
+        ResultSet rs = prep.executeQuery();
+        rs.next();
+        assertEquals("INTERVAL '100' MINUTE", rs.getString(1));
+        assertEquals(interval, rs.getObject(1));
+        assertEquals(interval, rs.getObject(1, Interval.class));
+    }
+
+    private void testInterval8(Connection conn) throws SQLException {
+        if (!LocalDateTimeUtils.isJava8DateApiPresent()) {
+            return;
+        }
+        PreparedStatement prep = conn.prepareStatement("SELECT ?");
+        testPeriod8(prep, 1, 2, "INTERVAL '1-2' YEAR TO MONTH");
+        testPeriod8(prep, -1, -2, "INTERVAL '-1-2' YEAR TO MONTH");
+        testPeriod8(prep, 1, -8, "INTERVAL '0-4' YEAR TO MONTH", 0, 4);
+        testPeriod8(prep, -1, 8, "INTERVAL '-0-4' YEAR TO MONTH", 0, -4);
+        testPeriod8(prep, 0, 0, "INTERVAL '0-0' YEAR TO MONTH");
+        testPeriod8(prep, 100, 0, "INTERVAL '100' YEAR");
+        testPeriod8(prep, -100, 0, "INTERVAL '-100' YEAR");
+        testPeriod8(prep, 0, 100, "INTERVAL '100' MONTH");
+        testPeriod8(prep, 0, -100, "INTERVAL '-100' MONTH");
+        Object period;
+        try {
+            Method method = LocalDateTimeUtils.PERIOD.getMethod("of", int.class, int.class, int.class);
+            period = method.invoke(null, 0, 0, 1);
+        } catch (ReflectiveOperationException ex) {
+            throw new RuntimeException(ex);
+        }
+        assertThrows(ErrorCode.INVALID_VALUE_2, prep).setObject(1, period);
+        Object duration;
+        try {
+            duration = LocalDateTimeUtils.DURATION.getMethod("ofSeconds", long.class, long.class)
+                    .invoke(null, -4, 900_000_000);
+        } catch (ReflectiveOperationException ex) {
+            throw new RuntimeException(ex);
+        }
+        prep.setObject(1, duration);
+        ResultSet rs = prep.executeQuery();
+        rs.next();
+        assertEquals("INTERVAL '-3.1' SECOND", rs.getString(1));
+        assertEquals(duration, rs.getObject(1, LocalDateTimeUtils.DURATION));
+    }
+
+    private void testPeriod8(PreparedStatement prep, int years, int months, String expectedString)
+            throws SQLException {
+        testPeriod8(prep, years, months, expectedString, years, months);
+    }
+
+    private void testPeriod8(PreparedStatement prep, int years, int months, String expectedString, int expYears,
+            int expMonths) throws SQLException {
+        Object period, expectedPeriod;
+        try {
+            Method method = LocalDateTimeUtils.PERIOD.getMethod("of", int.class, int.class, int.class);
+            period = method.invoke(null, years, months, 0);
+            expectedPeriod = method.invoke(null, expYears, expMonths, 0);
+        } catch (ReflectiveOperationException ex) {
+            throw new RuntimeException(ex);
+        }
+        prep.setObject(1, period);
+        ResultSet rs = prep.executeQuery();
+        rs.next();
+        assertEquals(expectedString, rs.getString(1));
+        assertEquals(expectedPeriod, rs.getObject(1, LocalDateTimeUtils.PERIOD));
+    }
+
     private void testPreparedSubquery(Connection conn) throws SQLException {
         Statement s = conn.createStatement();
         s.executeUpdate("CREATE TABLE TEST(ID IDENTITY, FLAG BIT)");
@@ -1600,6 +1674,12 @@ public class TestPreparedStatement extends TestDb {
         anyParameterCheck(ps, values, expected);
         ps = conn.prepareStatement("SELECT ID FROM TEST INNER JOIN TABLE(X INT=?) T ON TEST.VALUE = T.X");
         anyParameterCheck(ps, values, expected);
+        // Test expression IN(UNNEST(?))
+        ps = conn.prepareStatement("SELECT ID FROM TEST WHERE VALUE IN(UNNEST(?))");
+        assertThrows(ErrorCode.PARAMETER_NOT_SET_1, ps).executeQuery();
+        anyParameterCheck(ps, values, expected);
+        anyParameterCheck(ps, 300, new int[] {30});
+        anyParameterCheck(ps, -5, new int[0]);
         // Test expression = ANY(?)
         ps = conn.prepareStatement("SELECT ID FROM TEST WHERE VALUE = ANY(?)");
         assertThrows(ErrorCode.PARAMETER_NOT_SET_1, ps).executeQuery();
@@ -1664,4 +1744,18 @@ public class TestPreparedStatement extends TestDb {
                 ps.getParameterMetaData().getParameterType(1));
         stmt.execute("DROP TABLE TEST");
     }
+
+    private void testValueResultSet(Connection conn) throws SQLException {
+        for (int i = 0; i < 2; i++) {
+            try (PreparedStatement stmt = conn.prepareStatement("SELECT TABLE(X INT = (1))")) {
+                ResultSet rs = stmt.executeQuery();
+                while (rs.next()) {
+                    try (ResultSet rs2 = (ResultSet) rs.getObject(1)) {
+                        assertEquals(1, rs2.getMetaData().getColumnCount());
+                    }
+                }
+            }
+        }
+    }
+
 }

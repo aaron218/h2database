@@ -10,21 +10,18 @@ import java.util.HashSet;
 import java.util.List;
 
 import org.h2.api.ErrorCode;
+import org.h2.command.CommandInterface;
 import org.h2.command.Prepared;
 import org.h2.engine.Database;
-import org.h2.engine.Session;
 import org.h2.engine.Mode.ModeEnum;
+import org.h2.engine.Session;
 import org.h2.expression.Alias;
-import org.h2.expression.Comparison;
-import org.h2.expression.ConditionAndOr;
-import org.h2.expression.ConditionNot;
 import org.h2.expression.Expression;
 import org.h2.expression.ExpressionColumn;
 import org.h2.expression.ExpressionVisitor;
-import org.h2.expression.Function;
-import org.h2.expression.Operation;
 import org.h2.expression.Parameter;
 import org.h2.expression.ValueExpression;
+import org.h2.expression.function.FunctionCall;
 import org.h2.message.DbException;
 import org.h2.result.ResultInterface;
 import org.h2.result.ResultTarget;
@@ -44,39 +41,55 @@ import org.h2.value.ValueNull;
 public abstract class Query extends Prepared {
 
     /**
+     * The column list, including invisible expressions such as order by expressions.
+     */
+    ArrayList<Expression> expressions;
+
+    /**
+     * Array of expressions.
+     *
+     * @see #expressions
+     */
+    Expression[] expressionArray;
+
+    ArrayList<SelectOrderBy> orderList;
+
+    SortOrder sort;
+
+    /**
      * The limit expression as specified in the LIMIT or TOP clause.
      */
-    protected Expression limitExpr;
+    Expression limitExpr;
 
     /**
      * Whether limit expression specifies percentage of rows.
      */
-    protected boolean fetchPercent;
+    boolean fetchPercent;
 
     /**
      * Whether tied rows should be included in result too.
      */
-    protected boolean withTies;
+    boolean withTies;
 
     /**
      * The offset expression as specified in the LIMIT .. OFFSET clause.
      */
-    protected Expression offsetExpr;
+    Expression offsetExpr;
 
     /**
      * The sample size expression as specified in the SAMPLE_SIZE clause.
      */
-    protected Expression sampleSizeExpr;
+    Expression sampleSizeExpr;
 
     /**
      * Whether the result must only contain distinct rows.
      */
-    protected boolean distinct;
+    boolean distinct;
 
     /**
      * Whether the result needs to support random access.
      */
-    protected boolean randomAccessResult;
+    boolean randomAccessResult;
 
     private boolean noCache;
     private int lastLimit;
@@ -148,7 +161,9 @@ public abstract class Query extends Prepared {
      *
      * @return the list of expressions
      */
-    public abstract ArrayList<Expression> getExpressions();
+    public ArrayList<Expression> getExpressions() {
+        return expressions;
+    }
 
     /**
      * Calculate the cost to execute this query.
@@ -182,14 +197,18 @@ public abstract class Query extends Prepared {
      *
      * @param order the order by list
      */
-    public abstract void setOrder(ArrayList<SelectOrderBy> order);
+    public void setOrder(ArrayList<SelectOrderBy> order) {
+        orderList = order;
+    }
 
     /**
      * Whether the query has an order.
      *
      * @return true if it has
      */
-    public abstract boolean hasOrder();
+    public boolean hasOrder() {
+        return orderList != null || sort != null;
+    }
 
     /**
      * Set the 'for update' flag.
@@ -257,8 +276,9 @@ public abstract class Query extends Prepared {
      * Update all aggregate function values.
      *
      * @param s the session
+     * @param stage select stage
      */
-    public abstract void updateAggregate(Session s);
+    public abstract void updateAggregate(Session s, int stage);
 
     /**
      * Call the before triggers on all tables.
@@ -324,6 +344,10 @@ public abstract class Query extends Prepared {
         if (!cacheableChecked) {
             long max = getMaxDataModificationId();
             noCache = max == Long.MAX_VALUE;
+            if (!isEverything(ExpressionVisitor.DETERMINISTIC_VISITOR) ||
+                    !isEverything(ExpressionVisitor.INDEPENDENT_VISITOR)) {
+                noCache = true;
+            }
             cacheableChecked = true;
         }
         if (noCache) {
@@ -336,18 +360,10 @@ public abstract class Query extends Prepared {
                 return false;
             }
         }
-        if (!isEverything(ExpressionVisitor.DETERMINISTIC_VISITOR) ||
-                !isEverything(ExpressionVisitor.INDEPENDENT_VISITOR)) {
-            return false;
-        }
-        if (db.getModificationDataId() > lastEval &&
-                getMaxDataModificationId() > lastEval) {
-            return false;
-        }
-        return true;
+        return getMaxDataModificationId() <= lastEval;
     }
 
-    public final Value[] getParameterValues() {
+    private  Value[] getParameterValues() {
         ArrayList<Parameter> list = getParameters();
         if (list == null) {
             return new Value[0];
@@ -381,7 +397,7 @@ public abstract class Query extends Prepared {
         }
         fireBeforeSelectTriggers();
         if (noCache || !session.getDatabase().getOptimizeReuseResults() ||
-                session.isLazyQueryExecution()) {
+                (session.isLazyQueryExecution() && !neverLazy)) {
             return queryWithoutCacheLazyCheck(limit, target);
         }
         Value[] params = getParameterValues();
@@ -529,6 +545,7 @@ public abstract class Query extends Prepared {
      */
     private static boolean checkOrderOther(Session session, Expression expr, ArrayList<String> expressionSQL) {
         if (expr.isConstant()) {
+            // ValueExpression or other
             return true;
         }
         String exprSQL = expr.getSQL();
@@ -537,50 +554,33 @@ public abstract class Query extends Prepared {
                 return true;
             }
         }
-        if (expr instanceof Function) {
-            Function function = (Function) expr;
-            if (!function.isDeterministic()) {
+        int count = expr.getSubexpressionCount();
+        if (expr instanceof FunctionCall) {
+            if (!((FunctionCall) expr).isDeterministic()) {
                 return false;
             }
-            for (Expression e : function.getArgs()) {
-                if (!checkOrderOther(session, e, expressionSQL)) {
-                    return false;
-                }
+        } else if (count <= 0) {
+            // Expression is an ExpressionColumn, Parameter, SequenceValue or
+            // has other unsupported type without subexpressions
+            return false;
+        }
+        for (int i = 0; i < count; i++) {
+            if (!checkOrderOther(session, expr.getSubexpression(i), expressionSQL)) {
+                return false;
             }
-            return true;
         }
-        if (expr instanceof Operation) {
-            Operation operation = (Operation) expr;
-            Expression right = operation.getRightSubExpression();
-            return checkOrderOther(session, operation.getLeftSubExpression(), expressionSQL)
-                    && (right == null || checkOrderOther(session, right, expressionSQL));
-        }
-        if (expr instanceof ConditionAndOr) {
-            ConditionAndOr condition = (ConditionAndOr) expr;
-            return checkOrderOther(session, condition.getLeftSubExpression(), expressionSQL)
-                    && checkOrderOther(session, condition.getRightSubExpression(), expressionSQL);
-        }
-        if (expr instanceof ConditionNot) {
-            return checkOrderOther(session, ((ConditionNot) expr).getSubCondition(), expressionSQL);
-        }
-        if (expr instanceof Comparison) {
-            Comparison condition = (Comparison) expr;
-            return checkOrderOther(session, condition.getLeftSubExpression(), expressionSQL)
-                    && checkOrderOther(session, condition.getRightSubExpression(), expressionSQL);
-        }
-        return false;
+        return true;
     }
 
     /**
      * Create a {@link SortOrder} object given the list of {@link SelectOrderBy}
-     * objects. The expression list is extended if necessary.
+     * objects.
      *
      * @param orderList a list of {@link SelectOrderBy} elements
      * @param expressionCount the number of columns in the query
      * @return the {@link SortOrder} object
      */
-    public SortOrder prepareOrder(ArrayList<SelectOrderBy> orderList,
-            int expressionCount) {
+    public SortOrder prepareOrder(ArrayList<SelectOrderBy> orderList, int expressionCount) {
         int size = orderList.size();
         int[] index = new int[size];
         int[] sortType = new int[size];
@@ -588,8 +588,7 @@ public abstract class Query extends Prepared {
             SelectOrderBy o = orderList.get(i);
             int idx;
             boolean reverse = false;
-            Expression expr = o.columnIndexExpr;
-            Value v = expr.getValue(null);
+            Value v = o.columnIndexExpr.getValue(null);
             if (v == ValueNull.INSTANCE) {
                 // parameter not yet set - order by first column
                 idx = 0;
@@ -608,15 +607,16 @@ public abstract class Query extends Prepared {
             int type = o.sortType;
             if (reverse) {
                 // TODO NULLS FIRST / LAST should be inverted too?
-                if ((type & SortOrder.DESCENDING) != 0) {
-                    type &= ~SortOrder.DESCENDING;
-                } else {
-                    type |= SortOrder.DESCENDING;
-                }
+                type ^= SortOrder.DESCENDING;
             }
             sortType[i] = type;
         }
         return new SortOrder(session.getDatabase(), index, sortType, orderList);
+    }
+
+    @Override
+    public int getType() {
+        return CommandInterface.SELECT;
     }
 
     public void setOffset(Expression offset) {

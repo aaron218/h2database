@@ -176,7 +176,7 @@ public class ValueLobDb extends Value {
     private static String createTempLobFileName(DataHandler handler)
             throws IOException {
         String path = handler.getDatabasePath();
-        if (path.length() == 0) {
+        if (path.isEmpty()) {
             path = SysProperties.PREFIX_TEMP_FILE;
         }
         return FileUtils.createTempFile(path, Constants.SUFFIX_TEMP_FILE, true, true);
@@ -206,12 +206,11 @@ public class ValueLobDb extends Value {
      * @param precision the precision
      * @param mode the mode
      * @param column the column (if any), used for to improve the error message if conversion fails
-     * @param enumerators the ENUM datatype enumerators (if any),
-     *        for dealing with ENUM conversions
+     * @param extTypeInfo the extended data type information, or null
      * @return the converted value
      */
     @Override
-    public Value convertTo(int t, int precision, Mode mode, Object column, String[] enumerators) {
+    public Value convertTo(int t, int precision, Mode mode, Object column, ExtTypeInfo extTypeInfo) {
         if (t == valueType) {
             return this;
         } else if (t == Value.CLOB) {
@@ -462,15 +461,14 @@ public class ValueLobDb extends Value {
     }
 
     @Override
-    public String getSQL() {
-        String s;
+    public StringBuilder getSQL(StringBuilder builder) {
         if (valueType == Value.CLOB) {
-            s = getString();
-            return StringUtils.quoteStringSQL(s);
+            StringUtils.quoteStringSQL(builder, getString());
+        } else {
+            builder.append("X'");
+            StringUtils.convertBytesToHex(builder, getBytes()).append('\'');
         }
-        byte[] buff = getBytes();
-        s = StringUtils.convertBytesToHex(buff);
-        return "X'" + s + "'";
+        return builder;
     }
 
     @Override
